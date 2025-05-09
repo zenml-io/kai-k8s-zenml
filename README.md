@@ -1,127 +1,191 @@
-# NVIDIA KAI Scheduler Setup Guide
+# NVIDIA KAI Scheduler with ZenML on GCP
 
-This guide documents the process of setting up NVIDIA KAI Scheduler (Kubernetes AI Scheduler) on a GKE cluster with GPU nodes.
+This repository demonstrates how to set up NVIDIA KAI Scheduler (Kubernetes AI Scheduler) with ZenML on a GKE cluster. KAI Scheduler enables efficient GPU scheduling in Kubernetes, making it an ideal choice for ML workloads.
+
+## Introduction
+
+NVIDIA KAI Scheduler is specifically designed to optimize GPU resource allocation in Kubernetes clusters. This repository shows how to:
+
+1. Deploy a complete GCP infrastructure using Terraform
+2. Configure ZenML to work with GKE and KAI Scheduler
+3. Run ML training jobs efficiently on GPU resources
+
+## Infrastructure Overview
+
+The Terraform configuration in this repository creates:
+
+- A GKE cluster with regular CPU nodes for system workloads
+- A dedicated GPU node pool with NVIDIA T4 GPUs
+- Node Feature Discovery (NFD) for hardware feature detection
+- KAI Scheduler deployment
+- A GCS bucket for artifact storage
 
 ## Prerequisites
 
-- A GKE cluster with GPU nodes (e.g., NVIDIA T4)
-- `kubectl` configured to access your cluster
-- `helm` installed
+- Google Cloud Platform account with sufficient permissions
+- [Google Cloud SDK](https://cloud.google.com/sdk/docs/install) installed and configured
+- [Terraform](https://www.terraform.io/downloads.html) (v1.0.0+) installed
+- [kubectl](https://kubernetes.io/docs/tasks/tools/install-kubectl/) installed
+- [Helm](https://helm.sh/docs/intro/install/) installed
+- [ZenML](https://docs.zenml.io/getting-started/installation) (v0.52.0+) installed
 
-## 1. Verify GPU Node Status
+## Quick Start
 
-First, check if your GKE cluster has GPU nodes properly configured:
+For detailed instructions, see [How-To-Use-Terraform.md](How-To-Use-Terraform.md).
 
-```bash
-# List all nodes
-kubectl get nodes -o wide
-
-# Check GPU resources on a specific node
-kubectl describe node <gpu-node-name> | grep -A5 Capacity
-```
-
-## 2. Install NFD (Node Feature Discovery)
-
-NFD helps Kubernetes discover hardware features of nodes:
+### 1. Clone this repository
 
 ```bash
-# Add NFD Helm repository
-helm repo add nfd https://kubernetes-sigs.github.io/node-feature-discovery/charts
-helm repo update
-
-# Install NFD
-helm install nfd nfd/node-feature-discovery --namespace node-feature-discovery --create-namespace
+git clone https://github.com/your-org/kai-k8s-zenml.git
+cd kai-k8s-zenml
 ```
 
-## 3. Install KAI Scheduler
+### 2. Configure and Deploy with Terraform
 
 ```bash
-# Add NVIDIA Helm repository (if not already added)
-helm repo add nvidia https://helm.ngc.nvidia.com/nvidia
-helm repo update
-
-# Install KAI Scheduler
-helm upgrade -i kai-scheduler \
-    oci://ghcr.io/nvidia/kai-scheduler/kai-scheduler \
-    -n kai-scheduler --create-namespace --version 0.3.0
-
-# Verify KAI Scheduler is running
-kubectl get pods -n kai-scheduler
+cd terraform
+# Edit terraform.tfvars with your specific settings
+terraform init
+terraform plan  # Review the planned changes
+terraform apply # Deploy the infrastructure
 ```
 
-## 4. Configure KAI Scheduler Queues
-
-Create the queue configuration YAML file (`queues.yaml`) and apply it:
+### 3. Configure kubectl and Queue System
 
 ```bash
-kubectl apply -f queues.yaml
+# Configure kubectl to connect to your cluster
+$(terraform output -raw kubectl_command)
+
+# Apply KAI Scheduler queue configurations
+$(terraform output -raw apply_queue_config_command)
 ```
 
-**Important**: KAI Scheduler uses custom resource definitions for queues. Do not use ConfigMaps for queue configuration.
-
-## 5. Test GPU Workload with KAI Scheduler
-
-Create a test namespace for your GPU workloads:
+### 4. Verify the installation
 
 ```bash
-kubectl create namespace kai-test
+# Verify KAI Scheduler pods
+$(terraform output -raw check_kai_pods_command)
+
+# Verify Node Feature Discovery
+kubectl get pods -n node-feature-discovery
+
+# Verify GPU nodes
+kubectl get nodes -l accelerator=nvidia-gpu
 ```
 
-Deploy a test GPU pod using the KAI Scheduler:
+## Running ML Workloads with KAI Scheduler
+
+### Queue Configuration
+
+KAI Scheduler uses a hierarchical queue system for resource allocation. The default configuration in `queues.yaml` includes:
+
+- A root "default" queue with unrestricted resource access
+- A child "test" queue for running test workloads
+
+### Example Jobs
+
+This repository includes several example job specifications:
+
+1. **GPU Test Job** (`gpu-test-job.yaml`): A simple job that runs `nvidia-smi` to verify GPU access.
+2. **ML Training Job** (`ml-training-job.yaml`): A PyTorch training job that uses GPU resources.
+3. **Model Serving Deployment** (`model-serving-deployment.yaml`): A deployment for serving ML models.
+
+To run a test job:
 
 ```bash
 kubectl apply -f gpu-test-job.yaml
 ```
 
-Verify the pod is running and has access to the GPU:
+### Using with ZenML
 
-```bash
-kubectl get pods -n kai-test
-kubectl logs -n kai-test <pod-name>
+After deploying the infrastructure with Terraform, you can run ML pipelines with ZenML using KAI Scheduler:
+
+1. Register a ZenML stack with the infrastructure components:
+   ```bash
+   # Navigate to terraform directory to get outputs
+   cd terraform
+
+   # Register the stack with the deployed infrastructure
+   zenml stack register --name kai-gcp-stack \
+     --orchestrator kubernetes \
+     --artifact_store gcp \
+     --container_registry gcp
+
+   # Set it as the active stack
+   zenml stack set kai-gcp-stack
+   ```
+
+2. Run the included GPU test pipeline:
+   ```bash
+   python gpu_pipeline.py
+   ```
+
+3. When defining your own ZenML steps for GPU workloads, use the following configuration with KAI Scheduler:
+
+```python
+@step(
+    settings={
+        "resources": {
+            "gpu": 1
+        },
+        "kubernetes": {
+            "labels": {"runai/queue": "test"},
+            "scheduler_name": "kai-scheduler"
+        }
+    }
+)
+def my_gpu_training_step(...):
+    # Your GPU training code here
+    ...
 ```
 
-## Configuration Files
+## Key Learnings and Best Practices
 
-### `queues.yaml`
+During our setup process, we learned several important lessons:
 
-This file defines the queue hierarchy for KAI Scheduler.
+1. **GKE GPU Driver Management**: On GKE, GPU drivers are pre-installed and managed by the platform. Unlike other Kubernetes distributions, there's no need to install the NVIDIA GPU Operator.
 
-### `gpu-test-job.yaml`
+2. **Node Feature Discovery**: NFD is essential for proper GPU detection and scheduling.
 
-This file defines a simple GPU job that uses the KAI Scheduler to run nvidia-smi.
+3. **Queue Configuration**: KAI Scheduler requires queues to be defined as Kubernetes custom resources with the `scheduling.run.ai/v2` API type.
 
-### `ml-training-job.yaml`
+4. **Pod Requirements**: Pods must include both:
+   - The correct queue label (`runai/queue: <queue-name>`)
+   - The scheduler explicitly set (`schedulerName: kai-scheduler`)
 
-This file provides an example of a PyTorch-based ML training job that uses GPU resources via KAI Scheduler.
+5. **Resource Requests**: Always specify GPU resource requests in your pod specifications.
 
-### `model-serving-deployment.yaml`
+## Terraform Configuration
 
-This file demonstrates how to deploy a model serving application as a Kubernetes Deployment with KAI Scheduler.
+The Terraform configuration in the `/terraform` directory sets up all infrastructure needed for KAI scheduler with ZenML:
+
+- **main.tf**: Defines all GCP resources and Kubernetes components
+- **variables.tf**: Configurable parameters for customizing the deployment
+- **outputs.tf**: Provides useful commands and information after deployment
+- **terraform.tfvars**: Your specific configuration values
 
 ## Troubleshooting
 
 If pods remain in "Pending" state:
-- Check if queue configuration is correctly applied
-- Verify that pods have the proper queue label (`runai/queue: <queue-name>`)
-- Ensure the pod specifies `schedulerName: kai-scheduler`
+- Verify queue configuration is correctly applied (`kubectl get queue -A`)
+- Check that pods have the proper queue label (`kubectl get pods -o yaml`)
+- Ensure the pod specifies the correct scheduler name
 - Check GPU resource availability with `kubectl describe node <gpu-node-name>`
 
-## Key Learnings
+## Clean Up
 
-During our setup process, we encountered and resolved several important issues:
+To tear down the infrastructure:
 
-1. **Queue Configuration Format**: KAI Scheduler requires queues to be defined as Kubernetes custom resources with the `scheduling.run.ai/v2` API type, not through a ConfigMap.
+```bash
+terraform destroy
+```
 
-2. **Queue Hierarchy**: A hierarchical queue system is needed, with a top-level "default" queue and child queues.
+This will remove all resources created by Terraform, including the GKE cluster and associated components.
 
-3. **Pod Requirements**: Pods must have both:
-   - The correct queue label (`runai/queue: <queue-name>`)
-   - The scheduler explicitly set (`schedulerName: kai-scheduler`)
+## References
 
-4. **GPU Driver Management**: On GKE, GPU drivers are pre-installed and managed by the platform itself. Unlike other Kubernetes distributions, there's no need to install the NVIDIA GPU Operator.
-
-5. **NFD Requirements**: Node Feature Discovery helps the system identify hardware features including GPUs, making it a crucial component for proper GPU scheduling.
-
-## Note for GKE Users
-
-On GKE, GPU drivers are pre-installed and managed by GKE itself. Unlike other Kubernetes distributions, you do not need to install the NVIDIA GPU Operator on GKE.
+- [ZenML Documentation](https://docs.zenml.io/)
+- [NVIDIA KAI Scheduler GitHub](https://github.com/NVIDIA/kai-scheduler)
+- [NVIDIA KAI Scheduler Documentation](https://docs.nvidia.com/kai-scheduler/index.html)
+- [Google Kubernetes Engine Documentation](https://cloud.google.com/kubernetes-engine/docs)
+- [Terraform GCP Provider Documentation](https://registry.terraform.io/providers/hashicorp/google/latest/docs)

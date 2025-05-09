@@ -1,0 +1,22 @@
+# GCP Project Configuration
+project_id = "zenml-core"
+region     = "us-central1"
+zone       = "us-central1-a"
+
+# Main Cluster Node Pool Configuration
+node_pool_machine_type = "e2-standard-4"
+node_pool_min_count    = 2
+node_pool_max_count    = 5
+
+# GPU Node Configuration
+gpu_node_count         = 1
+gpu_node_machine_type  = "n1-standard-4"
+gpu_type               = "nvidia-tesla-t4"
+gpu_count_per_node     = 1
+
+# KAI Scheduler Configuration
+kai_scheduler_version  = "v0.5.0"
+
+# Storage Configuration
+artifact_store_bucket_name = "zenml-core-zenml-artifacts"
+bucket_versioning_enabled  = true

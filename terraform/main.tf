@@ -6,7 +6,7 @@ terraform {
     }
     zenml = {
       source  = "zenml-io/zenml"
-      version = "~> 1.0.0"
+      version = "~> 2.0.2"
     }
   }
 }
@@ -28,19 +28,15 @@ data "google_storage_bucket" "artifact_store" {
 
 # Create a service connector for GCP
 resource "zenml_service_connector" "gcp_connector" {
-  name           = "gcp-${var.stack_name}"
-  type           = "gcp"
-  resource_types = ["artifact-store", "container-registry", "orchestrator"]
-  auth_method    = "service-account"
+  name        = "gcp-${var.stack_name}"
+  type        = "gcp"
+  auth_method = "service-account"
 
   configuration = {
-    project_id = var.project_id
-    location   = var.region
+    project_id           = var.project_id
+    service_account_json = file("keys/zenml-kai-scheduler.json")
   }
 
-  secrets = {
-    service_account_json = jsondecode(file("keys/zenml-kai-scheduler.json")).private_key
-  }
 }
 
 # Register the GCP artifact store component

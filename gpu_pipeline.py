@@ -1,33 +1,20 @@
 from zenml import pipeline, step
-from zenml.integrations.kubernetes.flavors.kubernetes_orchestrator_flavor import (
-    KubernetesOrchestratorSettings,
-)
+from zenml.config import DockerSettings
+import os
 
-# Define KAI Scheduler settings
-kai_settings = KubernetesOrchestratorSettings(
-    pod_settings={
-        # Use KAI Scheduler
-        "scheduler_name": "kai-scheduler",
-        # Add KAI label for queue
-        "labels": {"runai/queue": "test"},
-        # Request GPU resources
-        "resources": {"limits": {"nvidia.com/gpu": "1"}},
-        # Add toleration for GPU nodes
-        "tolerations": [
-            {
-                "key": "nvidia.com/gpu",
-                "operator": "Equal",
-                "value": "present",
-                "effect": "NoSchedule",
-            }
-        ],
-    },
-    kubernetes_namespace="zenml",
+# Get the current directory to build the Dockerfile with the correct path
+current_dir = os.path.dirname(os.path.abspath(__file__))
+dockerfile_path = os.path.join(current_dir, "Dockerfile.gpu")
+
+# Use a custom Dockerfile that includes Python, pip, and ZenML
+docker_settings = DockerSettings(
+    dockerfile=dockerfile_path
+    # Use default pip installer instead of uv for compatibility with stack requirements
 )
 
 
-# Define a GPU-enabled step
-@step(settings={"orchestrator": kai_settings})
+# Define a GPU-enabled step with a shorter name
+@step(name="gpu_step")
 def gpu_test_step() -> None:
     import subprocess
 
@@ -39,8 +26,12 @@ def gpu_test_step() -> None:
         print(f"Error accessing GPU: {e}")
 
 
-# Define a simple pipeline
-@pipeline
+# Use shorter pipeline name
+@pipeline(
+    name="gpu_pipeline",
+    settings={"docker": docker_settings},
+    enable_cache=False,
+)
 def gpu_test_pipeline():
     gpu_test_step()
 

@@ -73,7 +73,7 @@ resource "zenml_stack_component" "k8s_orchestrator" {
 
   configuration = {
     kubernetes_context   = var.kubernetes_context
-    kubernetes_namespace = "zenml"
+    kubernetes_namespace = "kai-test"
 
     # KAI Scheduler configuration encoded as a JSON string
     pod_settings = jsonencode({

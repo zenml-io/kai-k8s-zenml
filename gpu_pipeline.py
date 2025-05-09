@@ -8,8 +8,11 @@ dockerfile_path = os.path.join(current_dir, "Dockerfile.gpu")
 
 # Use a custom Dockerfile that includes Python, pip, and ZenML
 docker_settings = DockerSettings(
-    dockerfile=dockerfile_path
-    # Use default pip installer instead of uv for compatibility with stack requirements
+    dockerfile=dockerfile_path,
+    package_installer="uv",
+    # parent_image="nvidia/cuda:12.2.0-runtime-ubuntu22.04",
+    apt_packages=["python3-pip", "python3-dev", "python-is-python3"],
+    environment={"DEBIAN_FRONTEND": "noninteractive"},
 )
 
 

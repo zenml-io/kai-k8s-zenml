@@ -1,0 +1,26 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: ml-training-job
+  namespace: kai-test
+spec:
+  template:
+    metadata:
+      labels:
+        runai/queue: test
+    spec:
+      schedulerName: kai-scheduler
+      restartPolicy: OnFailure
+      containers:
+      - name: training
+        image: nvcr.io/nvidia/pytorch:23.08-py3
+        command: ["python", "-c"]
+        args: [
+          "import torch; import time; print('CUDA available:', torch.cuda.is_available()); print('GPU device count:', torch.cuda.device_count()); print('GPU device name:', torch.cuda.get_device_name(0)); print('Running infinite loop to keep pod alive...'); while True: time.sleep(60)"
+        ]
+        resources:
+          limits:
+            nvidia.com/gpu: "1"
+          requests:
+            memory: "4Gi"
+            cpu: "1"

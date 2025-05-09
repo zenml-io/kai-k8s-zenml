@@ -15,66 +15,45 @@ variable "zone" {
   default     = "us-central1-a"
 }
 
-# Main cluster node pool configuration
-variable "node_pool_machine_type" {
-  description = "Machine type for the main node pool"
+variable "existing_cluster_name" {
+  description = "Name of the existing GKE cluster to use"
   type        = string
-  default     = "e2-standard-4"
+  default     = "zenml-kai-cluster"
 }
 
-variable "node_pool_min_count" {
-  description = "Minimum number of nodes in the main node pool"
-  type        = number
-  default     = 1
-}
-
-variable "node_pool_max_count" {
-  description = "Maximum number of nodes in the main node pool"
-  type        = number
-  default     = 3
-}
-
-# GPU node pool configuration
-variable "gpu_node_count" {
-  description = "Number of GPU nodes in the cluster"
-  type        = number
-  default     = 1
-}
-
-variable "gpu_node_machine_type" {
-  description = "Machine type for GPU nodes"
+variable "kubernetes_context" {
+  description = "Kubernetes context to use"
   type        = string
-  default     = "n1-standard-4"
+  default     = "gke_zenml-core_us-central1-a_zenml-kai-cluster"
 }
 
-variable "gpu_type" {
-  description = "Type of GPU to use (e.g., nvidia-tesla-t4)"
+variable "stack_name" {
+  description = "Name for the ZenML stack"
   type        = string
-  default     = "nvidia-tesla-t4"
-}
-
-variable "gpu_count_per_node" {
-  description = "Number of GPUs per node"
-  type        = number
-  default     = 1
-}
-
-# KAI Scheduler configuration
-variable "kai_scheduler_version" {
-  description = "Version of KAI Scheduler to install"
-  type        = string
-  default     = "v0.5.0"
+  default     = "kai-gcp-stack"
 }
 
 # Storage configuration
 variable "artifact_store_bucket_name" {
-  description = "Name for the GCS bucket used as artifact store (if empty, a name will be generated)"
+  description = "Name for the GCS bucket used as artifact store"
   type        = string
-  default     = ""
+  default     = "zenml-core-zenml-artifacts"
 }
 
 variable "bucket_versioning_enabled" {
   description = "Enable versioning for the GCS bucket"
   type        = bool
   default     = true
+}
+
+variable "container_registry_uri" {
+  description = "URI for the GCP Container Registry"
+  type        = string
+  default     = "gcr.io/zenml-core/zenml"
+}
+
+variable "create_zenml_namespace" {
+  description = "Whether to create the zenml namespace (set to false if it already exists)"
+  type        = bool
+  default     = false
 }

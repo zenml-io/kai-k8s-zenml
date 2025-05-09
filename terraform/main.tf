@@ -12,6 +12,10 @@ terraform {
       source  = "hashicorp/helm"
       version = "~> 2.11.0"
     }
+    zenml = {
+      source  = "zenml-io/zenml"
+      version = "~> 1.0.0"
+    }
   }
 }
 
@@ -21,113 +25,39 @@ provider "google" {
   zone    = var.zone
 }
 
-# Create GKE Cluster
-resource "google_container_cluster" "primary" {
-  name     = "zenml-kai-cluster-tf"
-  location = var.zone
-
-  # We can't create a cluster with no node pool defined, but we want to only use
-  # separately managed node pools. So we create the smallest possible default
-  # node pool and immediately delete it.
-  remove_default_node_pool = true
-  initial_node_count       = 1
-
-  # Set up workload identity
-  workload_identity_config {
-    workload_pool = "${var.project_id}.svc.id.goog"
-  }
-}
-
-# Create main node pool for standard workloads
-resource "google_container_node_pool" "primary_nodes" {
-  name       = "default-pool"
-  location   = var.zone
-  cluster    = google_container_cluster.primary.name
-  node_count = var.node_pool_min_count
-
-  autoscaling {
-    min_node_count = var.node_pool_min_count
-    max_node_count = var.node_pool_max_count
-  }
-
-  node_config {
-    machine_type = var.node_pool_machine_type
-    disk_size_gb = 100
-
-    # Set metadata on the nodes for GKE usage
-    oauth_scopes = [
-      "https://www.googleapis.com/auth/cloud-platform"
-    ]
-
-    # Set up workload identity
-    workload_metadata_config {
-      mode = "GKE_METADATA"
-    }
-  }
-}
-
-# Create GPU node pool
-resource "google_container_node_pool" "gpu_nodes" {
-  name       = "gpu-pool"
-  location   = var.zone
-  cluster    = google_container_cluster.primary.name
-  node_count = var.gpu_node_count
-
-  node_config {
-    machine_type = var.gpu_node_machine_type
-    disk_size_gb = 100
-    
-    guest_accelerator {
-      type  = var.gpu_type
-      count = var.gpu_count_per_node
-    }
-    
-    oauth_scopes = [
-      "https://www.googleapis.com/auth/cloud-platform"
-    ]
-    
-    workload_metadata_config {
-      mode = "GKE_METADATA"
-    }
-    
-    labels = {
-      "accelerator" = "nvidia-gpu"
-    }
-
-    taint {
-      key    = "nvidia.com/gpu"
-      value  = "present"
-      effect = "NO_SCHEDULE"
-    }
-  }
-  
-  depends_on = [google_container_node_pool.primary_nodes]
-}
-
-# Configure kubectl provider for post-setup tasks
+# Configure kubectl provider for accessing the existing cluster
 data "google_client_config" "provider" {}
+data "google_container_cluster" "existing_cluster" {
+  name     = var.existing_cluster_name
+  location = var.zone
+}
 
 provider "kubernetes" {
-  host  = "https://${google_container_cluster.primary.endpoint}"
+  host  = "https://${data.google_container_cluster.existing_cluster.endpoint}"
   token = data.google_client_config.provider.access_token
   cluster_ca_certificate = base64decode(
-    google_container_cluster.primary.master_auth[0].cluster_ca_certificate,
+    data.google_container_cluster.existing_cluster.master_auth[0].cluster_ca_certificate,
   )
 }
 
 provider "helm" {
   kubernetes {
-    host  = "https://${google_container_cluster.primary.endpoint}"
+    host  = "https://${data.google_container_cluster.existing_cluster.endpoint}"
     token = data.google_client_config.provider.access_token
     cluster_ca_certificate = base64decode(
-      google_container_cluster.primary.master_auth[0].cluster_ca_certificate,
+      data.google_container_cluster.existing_cluster.master_auth[0].cluster_ca_certificate,
     )
   }
 }
 
-# Create GCS bucket for artifact storage
+provider "zenml" {
+  # Credentials are provided via environment variables:
+  # ZENML_API_KEY and ZENML_SERVER_URL
+}
+
+# Create GCS bucket for artifact storage if it doesn't exist yet
 resource "google_storage_bucket" "artifact_store" {
-  name          = "${var.artifact_store_bucket_name}-tf"
+  name          = var.artifact_store_bucket_name
   location      = var.region
   force_destroy = true
 
@@ -136,53 +66,56 @@ resource "google_storage_bucket" "artifact_store" {
   }
 }
 
-# Install Node Feature Discovery (NFD)
-resource "kubernetes_namespace" "nfd" {
-  metadata {
-    name = "node-feature-discovery"
-  }
-  
-  depends_on = [google_container_node_pool.gpu_nodes]
-}
-
-resource "helm_release" "nfd" {
-  name       = "nfd"
-  repository = "https://kubernetes-sigs.github.io/node-feature-discovery/charts"
-  chart      = "node-feature-discovery"
-  namespace  = kubernetes_namespace.nfd.metadata[0].name
-
-  depends_on = [kubernetes_namespace.nfd]
-}
-
-# Install KAI Scheduler
-resource "kubernetes_namespace" "kai_scheduler" {
-  metadata {
-    name = "kai-scheduler"
-  }
-  
-  depends_on = [helm_release.nfd]
-}
-
-resource "helm_release" "kai_scheduler" {
-  name       = "kai-scheduler"
-  repository = "oci://ghcr.io/nvidia/kai-scheduler"
-  chart      = "kai-scheduler"
-  namespace  = kubernetes_namespace.kai_scheduler.metadata[0].name
-  version    = var.kai_scheduler_version
-
-  depends_on = [kubernetes_namespace.kai_scheduler]
-}
-
-# We'll create the queue configurations using kubectl rather than Kubernetes manifest resources
-# This avoids issues with the provider configuration and custom resource definitions
-# After applying the Terraform configuration, you can apply the queue configuration manually:
-# kubectl apply -f queues.yaml
-
-# Create ZenML namespace for running pipelines
+# Create ZenML namespace if it doesn't exist yet
 resource "kubernetes_namespace" "zenml" {
+  count = var.create_zenml_namespace ? 1 : 0
+  
   metadata {
     name = "zenml"
   }
+}
+
+# Register and configure stack with ZenML
+resource "zenml_stack_component" "kubernetes_orchestrator" {
+  name        = "${var.stack_name}-kubernetes"
+  type        = "orchestrator"
+  flavor      = "kubernetes"
   
-  depends_on = [google_container_cluster.primary]
+  configuration = jsonencode({
+    kubernetes_context     = var.kubernetes_context
+    kubernetes_namespace   = "zenml"
+    synchronous            = true
+  })
+}
+
+resource "zenml_stack_component" "gcp_artifact_store" {
+  name        = "${var.stack_name}-artifact-store"
+  type        = "artifact_store"
+  flavor      = "gcp"
+  
+  configuration = jsonencode({
+    path = "gs://${google_storage_bucket.artifact_store.name}"
+  })
+}
+
+resource "zenml_stack_component" "gcp_container_registry" {
+  name        = "${var.stack_name}-container-registry"
+  type        = "container_registry"
+  flavor      = "gcp"
+  
+  configuration = jsonencode({
+    uri = var.container_registry_uri
+  })
+}
+
+resource "zenml_stack" "kai_stack" {
+  name        = var.stack_name
+  orchestrator = zenml_stack_component.kubernetes_orchestrator.id
+  artifact_store = zenml_stack_component.gcp_artifact_store.id
+  container_registry = zenml_stack_component.gcp_container_registry.id
+
+  depends_on = [
+    google_storage_bucket.artifact_store,
+    kubernetes_namespace.zenml
+  ]
 }

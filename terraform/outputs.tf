@@ -1,6 +1,6 @@
-output "gke_cluster_name" {
-  value       = google_container_cluster.primary.name
-  description = "GKE cluster name"
+output "stack_name" {
+  value       = zenml_stack.kai_stack.name
+  description = "ZenML Stack Name"
 }
 
 output "gcs_bucket_name" {
@@ -8,30 +8,20 @@ output "gcs_bucket_name" {
   description = "GCS bucket name for ZenML artifacts"
 }
 
+output "gke_cluster_name" {
+  value       = data.google_container_cluster.existing_cluster.name
+  description = "GKE cluster name"
+}
+
 output "gke_cluster_endpoint" {
-  value       = google_container_cluster.primary.endpoint
+  value       = data.google_container_cluster.existing_cluster.endpoint
   description = "GKE cluster endpoint"
   sensitive   = true
 }
 
 output "kubectl_command" {
-  value       = "gcloud container clusters get-credentials ${google_container_cluster.primary.name} --zone ${var.zone} --project ${var.project_id}"
+  value       = "gcloud container clusters get-credentials ${data.google_container_cluster.existing_cluster.name} --zone ${var.zone} --project ${var.project_id}"
   description = "Command to configure kubectl"
-}
-
-output "kai_scheduler_namespace" {
-  value       = kubernetes_namespace.kai_scheduler.metadata[0].name
-  description = "Namespace where KAI Scheduler is installed"
-}
-
-output "check_kai_pods_command" {
-  value       = "kubectl get pods -n ${kubernetes_namespace.kai_scheduler.metadata[0].name}"
-  description = "Command to check KAI Scheduler pods"
-}
-
-output "zenml_namespace" {
-  value       = kubernetes_namespace.zenml.metadata[0].name
-  description = "Namespace for running ZenML pipelines"
 }
 
 output "apply_queue_config_command" {
@@ -39,10 +29,15 @@ output "apply_queue_config_command" {
   description = "Command to apply KAI Scheduler queue configuration"
 }
 
+output "zenml_run_command" {
+  value       = "zenml stack set ${var.stack_name} && python ../gpu_pipeline.py"
+  description = "Command to run the GPU pipeline with ZenML"
+}
+
 output "kai_queue_usage_example" {
   value       = <<-EOT
     # Example of using KAI Scheduler in a pod spec:
-
+    
     kind: Pod
     apiVersion: v1
     metadata:

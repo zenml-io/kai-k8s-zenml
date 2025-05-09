@@ -40,11 +40,22 @@ git clone https://github.com/your-org/kai-k8s-zenml.git
 cd kai-k8s-zenml
 ```
 
-### 2. Configure and Deploy with Terraform
+### 2. Set up GCP Authentication and Configure Terraform
 
 ```bash
 cd terraform
+# Create a copy of the example vars file
+cp terraform.tfvars.example terraform.tfvars
+
 # Edit terraform.tfvars with your specific settings
+nano terraform.tfvars
+
+# For development/testing, we're using oauth2 authentication
+# Make sure you're authenticated with gcloud:
+gcloud auth application-default login
+# This will use your user credentials for authentication
+
+# Initialize and deploy with Terraform
 terraform init
 terraform plan  # Review the planned changes
 terraform apply # Deploy the infrastructure
@@ -155,14 +166,76 @@ During our setup process, we learned several important lessons:
 
 5. **Resource Requests**: Always specify GPU resource requests in your pod specifications.
 
-## Terraform Configuration
+## Terraform Configuration for ZenML Stack
 
-The Terraform configuration in the `/terraform` directory sets up all infrastructure needed for KAI scheduler with ZenML:
+The Terraform configuration in the `/terraform` directory sets up a ZenML stack configured to work with the existing KAI-enabled GKE cluster:
 
-- **main.tf**: Defines all GCP resources and Kubernetes components
-- **variables.tf**: Configurable parameters for customizing the deployment
+- **main.tf**: Registers ZenML stack components using the ZenML provider with GKE and KAI Scheduler
+- **variables.tf**: Configurable parameters including cluster name, GCS bucket settings, and service account details
 - **outputs.tf**: Provides useful commands and information after deployment
-- **terraform.tfvars**: Your specific configuration values
+- **terraform.tfvars**: Default configuration values that can be customized
+
+### Authentication Setup
+
+For authentication with GCP, the configuration supports two methods:
+
+1. **Service Account Authentication (Recommended for Production)**
+   ```bash
+   # Create a service account with appropriate permissions
+   gcloud iam service-accounts create zenml-kai-scheduler --display-name="ZenML KAI Scheduler Service Account"
+
+   # Assign necessary roles
+   gcloud projects add-iam-policy-binding YOUR_PROJECT_ID \
+     --member="serviceAccount:zenml-kai-scheduler@YOUR_PROJECT_ID.iam.gserviceaccount.com" \
+     --role="roles/storage.admin" --condition=None
+
+   gcloud projects add-iam-policy-binding YOUR_PROJECT_ID \
+     --member="serviceAccount:zenml-kai-scheduler@YOUR_PROJECT_ID.iam.gserviceaccount.com" \
+     --role="roles/container.admin" --condition=None
+
+   # Create and download the key
+   mkdir -p keys
+   gcloud iam service-accounts keys create keys/zenml-kai-scheduler.json \
+     --iam-account=zenml-kai-scheduler@YOUR_PROJECT_ID.iam.gserviceaccount.com
+
+   # Export the key for Terraform to use
+   export TF_VAR_gcp_service_account_json="$(cat keys/zenml-kai-scheduler.json)"
+   ```
+
+2. **OAuth2 Authentication (For Development/Testing)**
+   ```bash
+   # Authenticate with your Google account
+   gcloud auth application-default login
+   ```
+
+### Deployment Steps
+
+To deploy the stack:
+
+```bash
+cd terraform
+
+# Copy and customize variables
+cp terraform.tfvars.example terraform.tfvars
+nano terraform.tfvars  # Edit with your specific settings
+
+# Initialize Terraform
+terraform init
+
+# Plan and apply
+terraform plan
+terraform apply
+```
+
+This will register a ZenML stack that's properly configured to use KAI Scheduler for GPU workloads, leveraging your existing GKE cluster. The stack will include:
+
+1. A GCP service connector (using your chosen authentication method)
+2. An artifact store component using your GCS bucket
+3. A container registry component for GCR
+4. A Kubernetes orchestrator configured to use KAI Scheduler
+5. A complete ZenML stack combining all these components
+
+After deployment, follow the commands in the Terraform outputs to validate the setup and run GPU pipelines.
 
 ## Troubleshooting
 

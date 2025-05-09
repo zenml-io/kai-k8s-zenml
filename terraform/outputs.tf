@@ -3,35 +3,44 @@ output "stack_name" {
   description = "ZenML Stack Name"
 }
 
+output "stack_id" {
+  value       = zenml_stack.kai_stack.id
+  description = "ZenML Stack ID"
+}
+
 output "gcs_bucket_name" {
-  value       = google_storage_bucket.artifact_store.name
+  value       = data.google_storage_bucket.artifact_store.name
   description = "GCS bucket name for ZenML artifacts"
 }
 
 output "gke_cluster_name" {
-  value       = data.google_container_cluster.existing_cluster.name
+  value       = var.existing_cluster_name
   description = "GKE cluster name"
 }
 
-output "gke_cluster_endpoint" {
-  value       = data.google_container_cluster.existing_cluster.endpoint
-  description = "GKE cluster endpoint"
-  sensitive   = true
-}
-
 output "kubectl_command" {
-  value       = "gcloud container clusters get-credentials ${data.google_container_cluster.existing_cluster.name} --zone ${var.zone} --project ${var.project_id}"
+  value       = "gcloud container clusters get-credentials ${var.existing_cluster_name} --zone ${var.zone} --project ${var.project_id}"
   description = "Command to configure kubectl"
 }
 
 output "apply_queue_config_command" {
-  value       = "kubectl apply -f ../queues.yaml --context=$(kubectl config current-context)"
+  value       = "kubectl apply -f ../queues.yaml --context=${var.kubernetes_context}"
   description = "Command to apply KAI Scheduler queue configuration"
 }
 
-output "zenml_run_command" {
-  value       = "zenml stack set ${var.stack_name} && python ../gpu_pipeline.py"
-  description = "Command to run the GPU pipeline with ZenML"
+output "verify_stack_command" {
+  value       = "zenml stack describe ${zenml_stack.kai_stack.name}"
+  description = "Command to verify the stack configuration"
+}
+
+output "set_active_stack_command" {
+  value       = "zenml stack set ${zenml_stack.kai_stack.name}"
+  description = "Command to set this stack as active"
+}
+
+output "run_gpu_pipeline" {
+  value       = "python ../gpu_pipeline.py"
+  description = "Command to run the GPU test pipeline"
 }
 
 output "kai_queue_usage_example" {

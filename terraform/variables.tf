@@ -52,8 +52,9 @@ variable "container_registry_uri" {
   default     = "gcr.io/zenml-core/zenml"
 }
 
-variable "create_zenml_namespace" {
-  description = "Whether to create the zenml namespace (set to false if it already exists)"
-  type        = bool
-  default     = false
+variable "gcp_service_account_json" {
+  description = "GCP Service Account JSON key content (sensitive)"
+  type        = string
+  sensitive   = true
+  default     = ""
 }

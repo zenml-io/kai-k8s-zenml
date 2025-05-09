@@ -4,14 +4,6 @@ terraform {
       source  = "hashicorp/google"
       version = "~> 5.0.0"
     }
-    kubernetes = {
-      source  = "hashicorp/kubernetes"
-      version = "~> 2.23.0"
-    }
-    helm = {
-      source  = "hashicorp/helm"
-      version = "~> 2.11.0"
-    }
     zenml = {
       source  = "zenml-io/zenml"
       version = "~> 1.0.0"
@@ -25,97 +17,97 @@ provider "google" {
   zone    = var.zone
 }
 
-# Configure kubectl provider for accessing the existing cluster
-data "google_client_config" "provider" {}
-data "google_container_cluster" "existing_cluster" {
-  name     = var.existing_cluster_name
-  location = var.zone
-}
-
-provider "kubernetes" {
-  host  = "https://${data.google_container_cluster.existing_cluster.endpoint}"
-  token = data.google_client_config.provider.access_token
-  cluster_ca_certificate = base64decode(
-    data.google_container_cluster.existing_cluster.master_auth[0].cluster_ca_certificate,
-  )
-}
-
-provider "helm" {
-  kubernetes {
-    host  = "https://${data.google_container_cluster.existing_cluster.endpoint}"
-    token = data.google_client_config.provider.access_token
-    cluster_ca_certificate = base64decode(
-      data.google_container_cluster.existing_cluster.master_auth[0].cluster_ca_certificate,
-    )
-  }
-}
-
 provider "zenml" {
-  # Credentials are provided via environment variables:
-  # ZENML_API_KEY and ZENML_SERVER_URL
+  # Uses ZENML_SERVER_URL and ZENML_API_KEY environment variables
 }
 
-# Create GCS bucket for artifact storage if it doesn't exist yet
-resource "google_storage_bucket" "artifact_store" {
-  name          = var.artifact_store_bucket_name
-  location      = var.region
-  force_destroy = true
+# Use data source instead of resource for existing GCS bucket
+data "google_storage_bucket" "artifact_store" {
+  name = var.artifact_store_bucket_name
+}
 
-  versioning {
-    enabled = var.bucket_versioning_enabled
+# Create a service connector for GCP
+resource "zenml_service_connector" "gcp_connector" {
+  name           = "gcp-${var.stack_name}"
+  type           = "gcp"
+  auth_method    = "service-account"
+  resource_types = ["artifact-store", "container-registry", "orchestrator"]
+
+  configuration = {
+    project_id = var.project_id
+    location   = var.region
+    service_account_json = var.gcp_service_account_json
   }
 }
 
-# Create ZenML namespace if it doesn't exist yet
-resource "kubernetes_namespace" "zenml" {
-  count = var.create_zenml_namespace ? 1 : 0
+# Register the GCP artifact store component
+resource "zenml_stack_component" "artifact_store" {
+  name   = "gcp-artifact-store-${var.stack_name}"
+  type   = "artifact_store"
+  flavor = "gcp"
   
-  metadata {
-    name = "zenml"
+  configuration = {
+    path = "gs://${data.google_storage_bucket.artifact_store.name}"
   }
+  
+  connector_id = zenml_service_connector.gcp_connector.id
 }
 
-# Register and configure stack with ZenML
-resource "zenml_stack_component" "kubernetes_orchestrator" {
-  name        = "${var.stack_name}-kubernetes"
-  type        = "orchestrator"
-  flavor      = "kubernetes"
+# Register the GCP container registry component
+resource "zenml_stack_component" "container_registry" {
+  name   = "gcp-container-registry-${var.stack_name}"
+  type   = "container_registry"
+  flavor = "gcp"
   
-  configuration = jsonencode({
-    kubernetes_context     = var.kubernetes_context
-    kubernetes_namespace   = "zenml"
-    synchronous            = true
-  })
-}
-
-resource "zenml_stack_component" "gcp_artifact_store" {
-  name        = "${var.stack_name}-artifact-store"
-  type        = "artifact_store"
-  flavor      = "gcp"
-  
-  configuration = jsonencode({
-    path = "gs://${google_storage_bucket.artifact_store.name}"
-  })
-}
-
-resource "zenml_stack_component" "gcp_container_registry" {
-  name        = "${var.stack_name}-container-registry"
-  type        = "container_registry"
-  flavor      = "gcp"
-  
-  configuration = jsonencode({
+  configuration = {
     uri = var.container_registry_uri
-  })
+  }
+  
+  connector_id = zenml_service_connector.gcp_connector.id
 }
 
-resource "zenml_stack" "kai_stack" {
-  name        = var.stack_name
-  orchestrator = zenml_stack_component.kubernetes_orchestrator.id
-  artifact_store = zenml_stack_component.gcp_artifact_store.id
-  container_registry = zenml_stack_component.gcp_container_registry.id
+# Register Kubernetes orchestrator with KAI Scheduler configuration
+resource "zenml_stack_component" "k8s_orchestrator" {
+  name   = "kai-kubernetes-${var.stack_name}"
+  type   = "orchestrator"
+  flavor = "kubernetes"
+  
+  configuration = {
+    kubernetes_context   = var.kubernetes_context
+    kubernetes_namespace = "zenml"
+    
+    # KAI Scheduler configuration encoded as a JSON string
+    pod_settings = jsonencode({
+      scheduler_name = "kai-scheduler"
+      labels = {
+        "runai/queue" = "test"
+      }
+      resources = {
+        limits = {
+          "nvidia.com/gpu" = "1"
+        }
+      }
+      tolerations = [
+        {
+          key      = "nvidia.com/gpu"
+          operator = "Equal"
+          value    = "present"
+          effect   = "NoSchedule"
+        }
+      ]
+    })
+  }
+  
+  connector_id = zenml_service_connector.gcp_connector.id
+}
 
-  depends_on = [
-    google_storage_bucket.artifact_store,
-    kubernetes_namespace.zenml
-  ]
+# Create a ZenML stack with the registered components
+resource "zenml_stack" "kai_stack" {
+  name = var.stack_name
+  
+  components = {
+    orchestrator      = zenml_stack_component.k8s_orchestrator.id
+    artifact_store    = zenml_stack_component.artifact_store.id
+    container_registry = zenml_stack_component.container_registry.id
+  }
 }

@@ -5,6 +5,7 @@ zone       = "us-central1-a"
 
 # Existing Cluster Configuration
 existing_cluster_name = "zenml-kai-cluster"
+kubernetes_context = "gke_zenml-core_us-central1-a_zenml-kai-cluster"
 
 # ZenML Stack Configuration
 stack_name = "kai-gcp-stack"
@@ -15,6 +16,3 @@ bucket_versioning_enabled  = true
 
 # Container Registry
 container_registry_uri = "gcr.io/zenml-core/zenml"
-
-# Namespace Configuration
-create_zenml_namespace = false

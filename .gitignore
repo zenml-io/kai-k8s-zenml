@@ -177,3 +177,4 @@ cython_debug/
 .zen/
 
 **/.claude/settings.local.json
+.terraform/

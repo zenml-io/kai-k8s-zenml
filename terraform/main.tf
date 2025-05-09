@@ -30,13 +30,16 @@ data "google_storage_bucket" "artifact_store" {
 resource "zenml_service_connector" "gcp_connector" {
   name           = "gcp-${var.stack_name}"
   type           = "gcp"
-  auth_method    = "service-account"
   resource_types = ["artifact-store", "container-registry", "orchestrator"]
+  auth_method    = "service-account"
 
   configuration = {
     project_id = var.project_id
     location   = var.region
-    service_account_json = var.gcp_service_account_json
+  }
+
+  secrets = {
+    service_account_json = jsondecode(file("keys/zenml-kai-scheduler.json")).private_key
   }
 }
 
@@ -45,11 +48,11 @@ resource "zenml_stack_component" "artifact_store" {
   name   = "gcp-artifact-store-${var.stack_name}"
   type   = "artifact_store"
   flavor = "gcp"
-  
+
   configuration = {
     path = "gs://${data.google_storage_bucket.artifact_store.name}"
   }
-  
+
   connector_id = zenml_service_connector.gcp_connector.id
 }
 
@@ -58,11 +61,11 @@ resource "zenml_stack_component" "container_registry" {
   name   = "gcp-container-registry-${var.stack_name}"
   type   = "container_registry"
   flavor = "gcp"
-  
+
   configuration = {
     uri = var.container_registry_uri
   }
-  
+
   connector_id = zenml_service_connector.gcp_connector.id
 }
 
@@ -71,11 +74,11 @@ resource "zenml_stack_component" "k8s_orchestrator" {
   name   = "kai-kubernetes-${var.stack_name}"
   type   = "orchestrator"
   flavor = "kubernetes"
-  
+
   configuration = {
     kubernetes_context   = var.kubernetes_context
     kubernetes_namespace = "zenml"
-    
+
     # KAI Scheduler configuration encoded as a JSON string
     pod_settings = jsonencode({
       scheduler_name = "kai-scheduler"
@@ -97,17 +100,17 @@ resource "zenml_stack_component" "k8s_orchestrator" {
       ]
     })
   }
-  
+
   connector_id = zenml_service_connector.gcp_connector.id
 }
 
 # Create a ZenML stack with the registered components
 resource "zenml_stack" "kai_stack" {
   name = var.stack_name
-  
+
   components = {
-    orchestrator      = zenml_stack_component.k8s_orchestrator.id
-    artifact_store    = zenml_stack_component.artifact_store.id
+    orchestrator       = zenml_stack_component.k8s_orchestrator.id
+    artifact_store     = zenml_stack_component.artifact_store.id
     container_registry = zenml_stack_component.container_registry.id
   }
 }

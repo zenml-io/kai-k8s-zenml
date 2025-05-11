@@ -10,15 +10,12 @@ from zenml.integrations.kubernetes.flavors.kubernetes_orchestrator_flavor import
     KubernetesOrchestratorSettings,
 )
 
-# Use a publicly available image with Python and CUDA
+# Use custom Dockerfile with PyTorch and CUDA support
 docker_settings = DockerSettings(
-    python_package_installer="uv",
-    parent_image="nvidia/cuda:12.1.0-runtime-ubuntu22.04",
-    apt_packages=["python3", "python3-pip", "python-is-python3"],
-    requirements=["zenml"],
+    dockerfile="/Users/strickvl/coding/zenml/repos/kai-k8s-zenml/Dockerfile.pytorch",
+    build_context_root="/Users/strickvl/coding/zenml/repos/kai-k8s-zenml"
 )
 
-# Define Kubernetes settings for GPU resources using the KubernetesOrchestratorSettings
 kubernetes_settings = KubernetesOrchestratorSettings(
     pod_settings={
         "resources": {

@@ -1,30 +1,42 @@
+import ctypes
+import os
+from ctypes import byref, c_int
+
 from zenml import pipeline, step
 from zenml.config import DockerSettings
-import os
 
 # Get the current directory to build the Dockerfile with the correct path
 current_dir = os.path.dirname(os.path.abspath(__file__))
 dockerfile_path = os.path.join(current_dir, "Dockerfile.gpu")
 
 # Use a custom Dockerfile that includes Python, pip, and ZenML
-docker_settings = DockerSettings(
-    dockerfile=dockerfile_path,
-    package_installer="uv",
-    # parent_image="nvidia/cuda:12.2.0-runtime-ubuntu22.04",
-    apt_packages=["python3-pip", "python3-dev", "python-is-python3"],
-    environment={"DEBIAN_FRONTEND": "noninteractive"},
-)
+docker_settings = DockerSettings(python_package_installer="uv")
+
+
+def has_cuda_gpu() -> bool:
+    # 1.  Try every name the driver might have on the current OS
+    for lib in ("libcuda.so", "libcuda.dylib", "nvcuda.dll"):
+        try:
+            cuda = ctypes.CDLL(lib)
+        except OSError:
+            continue  # library not found on this platform – keep trying
+        # 2.  Probe the driver
+        if cuda.cuInit(0) != 0:  # driver present but not initialised
+            continue
+        count = c_int()
+        if cuda.cuDeviceGetCount(byref(count)) != 0:
+            continue  # API failed – treat as “no GPU”
+        return count.value > 0
+    return False  # no driver library found at all
 
 
 # Define a GPU-enabled step with a shorter name
 @step(name="gpu_step")
 def gpu_test_step() -> None:
-    import subprocess
-
     try:
         # Try to run nvidia-smi to verify GPU access
-        output = subprocess.check_output(["nvidia-smi"])
-        print(f"GPU is available:\n{output.decode()}")
+        output = has_cuda_gpu()
+        print(f"GPU is available: {output}")
     except Exception as e:
         print(f"Error accessing GPU: {e}")
 

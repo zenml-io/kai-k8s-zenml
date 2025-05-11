@@ -29,6 +29,9 @@ kubernetes_settings = KubernetesOrchestratorSettings(
             )
         ],
         "scheduler_name": "kai-scheduler",
+        "labels": {
+            "runai/queue": "test"  # Required for KAI Scheduler
+        },
         "annotations": {
             "gpu-fraction": "0.5"  # Use 50% of GPU resources
             # Alternatively, use "gpu-memory": "2000" for specific memory allocation in MiB

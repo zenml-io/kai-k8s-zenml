@@ -136,6 +136,9 @@ zenml stack set kai-gcp-stack
 # Return to the project root
 cd ..
 
+# Build the Docker image used by the pipeline (using Dockerfile.pytorch)
+docker build -t strickvl/pytorch-zenml-gpu:root -f Dockerfile.pytorch .
+
 # Run the GPU test pipeline
 python gpu_pipeline.py
 ```
@@ -233,6 +236,13 @@ The Terraform configuration in this repository creates:
 - Node Feature Discovery (NFD) for hardware feature detection
 - KAI Scheduler deployment
 - A GCS bucket for artifact storage
+
+### Docker Images
+
+This repository includes the following Dockerfiles:
+
+- **Dockerfile.pytorch**: Creates the base PyTorch image `strickvl/pytorch-zenml-gpu:root` used in the GPU test pipeline. This image includes CUDA, PyTorch, and ZenML dependencies required for GPU workloads.
+- **Dockerfile.gpu**: Another GPU-enabled image option for specialized use cases.
 
 ## Key Learnings and Best Practices
 

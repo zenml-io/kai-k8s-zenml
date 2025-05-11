@@ -216,3 +216,4 @@ cython_debug/
 
 **/.claude/settings.local.json
 .terraform/
+terraform/keys/

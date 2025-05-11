@@ -18,10 +18,8 @@ docker_settings = DockerSettings(
 
 kubernetes_settings = KubernetesOrchestratorSettings(
     pod_settings={
-        "resources": {
-            "limits": {"nvidia.com/gpu": "1"},
-            "requests": {"nvidia.com/gpu": "1"},
-        },
+        # When using KAI Scheduler with gpu-fraction, we don't need to specify
+        # nvidia.com/gpu in the resources section
         "tolerations": [
             V1Toleration(
                 key="nvidia.com/gpu",
@@ -30,6 +28,11 @@ kubernetes_settings = KubernetesOrchestratorSettings(
                 effect="NoSchedule",
             )
         ],
+        "scheduler_name": "kai-scheduler",
+        "annotations": {
+            "gpu-fraction": "0.5"  # Use 50% of GPU resources
+            # Alternatively, use "gpu-memory": "2000" for specific memory allocation in MiB
+        },
     }
 )
 

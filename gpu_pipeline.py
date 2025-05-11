@@ -1,4 +1,6 @@
 import ctypes
+import os
+import subprocess
 from ctypes import byref, c_int
 
 from kubernetes.client.models import V1Toleration
@@ -8,8 +10,12 @@ from zenml.integrations.kubernetes.flavors.kubernetes_orchestrator_flavor import
     KubernetesOrchestratorSettings,
 )
 
-# Use a custom Dockerfile that includes Python, pip, and ZenML
-docker_settings = DockerSettings(python_package_installer="uv")
+# Use a lightweight image with Python and CUDA
+docker_settings = DockerSettings(
+    python_package_installer="uv",
+    parent_image="nvcr.io/nvidia/python:23.10-py3",
+    requirements=["zenml"],
+)
 
 # Define Kubernetes settings for GPU resources using the KubernetesOrchestratorSettings
 kubernetes_settings = KubernetesOrchestratorSettings(
@@ -31,20 +37,53 @@ kubernetes_settings = KubernetesOrchestratorSettings(
 
 
 def has_cuda_gpu() -> bool:
-    # 1.  Try every name the driver might have on the current OS
-    for lib in ("libcuda.so", "libcuda.dylib", "nvcuda.dll"):
+    """
+    Check if CUDA GPU is available using multiple detection methods.
+
+    Returns:
+        bool: True if a CUDA GPU is available, False otherwise
+    """
+    # Method 1: Check environment variables
+    if any(var in os.environ for var in ["CUDA_VISIBLE_DEVICES", "GPU_DEVICE_ORDINAL"]):
+        devices = os.environ.get(
+            "CUDA_VISIBLE_DEVICES", os.environ.get("GPU_DEVICE_ORDINAL", "")
+        )
+        if devices and devices != "-1":
+            return True
+
+    # Method 2: Try CUDA driver detection via ctypes
+    for lib in ("libcuda.so", "libcuda.so.1", "libcuda.dylib", "nvcuda.dll"):
         try:
             cuda = ctypes.CDLL(lib)
-        except OSError:
-            continue  # library not found on this platform – keep trying
-        # 2.  Probe the driver
-        if cuda.cuInit(0) != 0:  # driver present but not initialised
+            # Initialize the driver
+            result = cuda.cuInit(0)
+            if result == 0:  # Success
+                # Get device count
+                count = c_int()
+                if cuda.cuDeviceGetCount(byref(count)) == 0:  # Success
+                    if count.value > 0:
+                        return True
+        except (OSError, AttributeError):
+            # Library not found or missing required function
             continue
-        count = c_int()
-        if cuda.cuDeviceGetCount(byref(count)) != 0:
-            continue  # API failed – treat as “no GPU”
-        return count.value > 0
-    return False  # no driver library found at all
+
+    # Method 3: Check using subprocess (nvidia-smi)
+    try:
+        result = subprocess.run(
+            ["nvidia-smi", "--query-gpu=name", "--format=csv,noheader"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            timeout=5,  # Add timeout to prevent hanging
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            return True
+    except (subprocess.SubprocessError, FileNotFoundError):
+        # nvidia-smi not available or failed
+        pass
+
+    # No GPU detected with any method
+    return False
 
 
 # Define a GPU-enabled step with a shorter name

@@ -10,10 +10,11 @@ from zenml.integrations.kubernetes.flavors.kubernetes_orchestrator_flavor import
     KubernetesOrchestratorSettings,
 )
 
-# Use a lightweight image with Python and CUDA
+# Use a publicly available image with Python and CUDA
 docker_settings = DockerSettings(
     python_package_installer="uv",
-    parent_image="nvcr.io/nvidia/python:23.10-py3",
+    parent_image="nvidia/cuda:12.1.0-runtime-ubuntu22.04",
+    apt_packages=["python3", "python3-pip", "python-is-python3"],
     requirements=["zenml"],
 )
 

@@ -13,7 +13,7 @@ This guide explains how to use the Terraform configuration in this repository to
 2. Ensure you're authenticated with Google Cloud:
    ```bash
    gcloud auth login
-   gcloud config set project zenml-core
+   gcloud config set project YOUR_GCP_PROJECT_ID
    ```
 
 ## Step 1: Configure Terraform

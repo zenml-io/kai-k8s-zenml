@@ -13,7 +13,8 @@ from zenml.integrations.kubernetes.flavors.kubernetes_orchestrator_flavor import
 # Use custom Dockerfile with PyTorch and CUDA support
 docker_settings = DockerSettings(
     dockerfile="/Users/strickvl/coding/zenml/repos/kai-k8s-zenml/Dockerfile.pytorch",
-    build_context_root="/Users/strickvl/coding/zenml/repos/kai-k8s-zenml"
+    build_context_root="/Users/strickvl/coding/zenml/repos/kai-k8s-zenml",
+    python_package_installer="uv",
 )
 
 kubernetes_settings = KubernetesOrchestratorSettings(

@@ -25,9 +25,8 @@ RUN echo "zenml>=0.82.0\ngcsfs\ngoogle-cloud-aiplatform>=1.34.0\ngoogle-cloud-ar
 # Install requirements using UV with system flag
 RUN uv pip install --system -r /app/requirements.txt
 
-# Create a non-root user for better security
-RUN useradd -m zenml
-USER zenml
+# Ensure app directory has proper permissions
+RUN chmod -R 777 /app
 
-# Add current directory to path
-ENV PATH="/home/zenml/.local/bin:${PATH}"
+# Add local bin to path
+ENV PATH="/root/.local/bin:${PATH}"

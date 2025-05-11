@@ -84,22 +84,76 @@ kubectl get pods -n node-feature-discovery
 kubectl get nodes -l accelerator=nvidia-gpu
 ```
 
+## Setting Up NVIDIA KAI Scheduler
+
+NVIDIA's Kubernetes AI (KAI) Scheduler enables efficient GPU scheduling, including features like GPU sharing, which allows multiple workloads to share the same GPU. Follow these steps to install and configure KAI Scheduler:
+
+### 1. Install KAI Scheduler with Helm
+
+```bash
+# Add the NVIDIA Helm repository
+helm repo add nvidia https://helm.ngc.nvidia.com/nvidia
+helm repo update
+
+# Install KAI Scheduler with GPU sharing enabled
+helm install kai-scheduler nvidia/kai-scheduler \
+  --create-namespace \
+  --namespace kai-scheduler \
+  --set global.gpuSharing=true
+```
+
+> **Note**: If you've already installed KAI Scheduler without GPU sharing, you can enable it by patching the binder deployment:
+> ```bash
+> kubectl -n kai-scheduler patch deployment binder --type='json' \
+>   -p='[{"op": "replace", "path": "/spec/template/spec/containers/0/args/4", "value": "--gpu-sharing-enabled=true"}]'
+> ```
+
+### 2. Verify KAI Scheduler Installation
+
+```bash
+# Check the KAI Scheduler pods
+kubectl get pods -n kai-scheduler
+
+# Verify GPU sharing is enabled
+kubectl -n kai-scheduler get deployment binder -o json | grep -i gpu-sharing
+# Should output: "--gpu-sharing-enabled=true"
+```
+
+### 3. Configure Queues for Resource Allocation
+
+KAI Scheduler uses a hierarchical queue system. Apply the provided queue configuration:
+
+```bash
+# Apply queue configuration
+kubectl apply -f queues.yaml
+```
+
+### 4. Test GPU Sharing
+
+This repository includes test jobs to verify GPU sharing:
+
+- `gpu-test-job-fractional.yaml`: Uses a fraction (50%) of a GPU
+- `gpu-test-job-memory.yaml`: Uses a specific amount of GPU memory (2000 MiB)
+
+```bash
+# Test fractional GPU sharing
+kubectl apply -f gpu-test-job-fractional.yaml
+
+# Test specific GPU memory allocation
+kubectl apply -f gpu-test-job-memory.yaml
+```
+
 ## Running ML Workloads with KAI Scheduler
-
-### Queue Configuration
-
-KAI Scheduler uses a hierarchical queue system for resource allocation. The default configuration in `queues.yaml` includes:
-
-- A root "default" queue with unrestricted resource access
-- A child "test" queue for running test workloads
 
 ### Example Jobs
 
 This repository includes several example job specifications:
 
-1. **GPU Test Job** (`gpu-test-job.yaml`): A simple job that runs `nvidia-smi` to verify GPU access.
-2. **ML Training Job** (`ml-training-job.yaml`): A PyTorch training job that uses GPU resources.
-3. **Model Serving Deployment** (`model-serving-deployment.yaml`): A deployment for serving ML models.
+1. **GPU Test Job** (`gpu-test-job.yaml`): A simple job that runs `nvidia-smi` to verify GPU access
+2. **Fractional GPU Test Job** (`gpu-test-job-fractional.yaml`): Tests 50% GPU sharing
+3. **GPU Memory Test Job** (`gpu-test-job-memory.yaml`): Tests specific GPU memory allocation
+4. **ML Training Job** (`ml-training-job.yaml`): A PyTorch training job that uses GPU resources
+5. **Model Serving Deployment** (`model-serving-deployment.yaml`): A deployment for serving ML models
 
 To run a test job:
 
@@ -131,23 +185,65 @@ After deploying the infrastructure with Terraform, you can run ML pipelines with
    python gpu_pipeline.py
    ```
 
-3. When defining your own ZenML steps for GPU workloads, use the following configuration with KAI Scheduler:
+### ZenML Configuration for GPU Sharing
+
+There are two approaches to use fractional GPUs with ZenML:
+
+#### 1. Using Fractional GPU (50% of a GPU)
 
 ```python
-@step(
-    settings={
-        "resources": {
-            "gpu": 1
+from kubernetes.client.models import V1Toleration
+from zenml.config import DockerSettings
+from zenml.integrations.kubernetes.flavors.kubernetes_orchestrator_flavor import (
+    KubernetesOrchestratorSettings,
+)
+
+kubernetes_settings = KubernetesOrchestratorSettings(
+    pod_settings={
+        # When using KAI Scheduler with gpu-fraction, we don't specify
+        # nvidia.com/gpu in the resources section
+        "tolerations": [
+            V1Toleration(
+                key="nvidia.com/gpu",
+                operator="Equal",
+                value="present",
+                effect="NoSchedule",
+            )
+        ],
+        "scheduler_name": "kai-scheduler",
+        "annotations": {
+            "gpu-fraction": "0.5"  # Use 50% of GPU resources
         },
-        "kubernetes": {
-            "labels": {"runai/queue": "test"},
-            "scheduler_name": "kai-scheduler"
-        }
     }
 )
-def my_gpu_training_step(...):
-    # Your GPU training code here
+
+@step(name="gpu_step", settings={"orchestrator": kubernetes_settings})
+def gpu_test_step():
+    # Your GPU code here
     ...
+```
+
+#### 2. Using Specific GPU Memory (e.g., 2000 MiB)
+
+```python
+kubernetes_settings = KubernetesOrchestratorSettings(
+    pod_settings={
+        # When using KAI Scheduler with gpu-memory, we don't specify
+        # nvidia.com/gpu in the resources section
+        "tolerations": [
+            V1Toleration(
+                key="nvidia.com/gpu",
+                operator="Equal",
+                value="present",
+                effect="NoSchedule",
+            )
+        ],
+        "scheduler_name": "kai-scheduler",
+        "annotations": {
+            "gpu-memory": "2000"  # Request 2000 MiB of GPU memory
+        },
+    }
+)
 ```
 
 ## Key Learnings and Best Practices
@@ -164,7 +260,15 @@ During our setup process, we learned several important lessons:
    - The correct queue label (`runai/queue: <queue-name>`)
    - The scheduler explicitly set (`schedulerName: kai-scheduler`)
 
-5. **Resource Requests**: Always specify GPU resource requests in your pod specifications.
+5. **GPU Sharing Requirements**:
+   - GPU sharing must be explicitly enabled in KAI Scheduler
+   - When using `gpu-fraction` or `gpu-memory` annotations, do NOT specify `nvidia.com/gpu` resource requests/limits
+   - GPU sharing requires KAI Scheduler pods to run with the `--gpu-sharing-enabled=true` argument
+
+6. **Common GPU Sharing Issues**:
+   - Mixing GPU resource requests and fractional GPU annotations will be rejected
+   - If pods remain in "Pending" state with GPU sharing, check the KAI Scheduler logs
+   - For diagnostics, use `kubectl describe pod <pod-name>` to see admission webhook errors
 
 ## Terraform Configuration for ZenML Stack
 
@@ -239,11 +343,39 @@ After deployment, follow the commands in the Terraform outputs to validate the s
 
 ## Troubleshooting
 
+### General Issues
+
 If pods remain in "Pending" state:
 - Verify queue configuration is correctly applied (`kubectl get queue -A`)
 - Check that pods have the proper queue label (`kubectl get pods -o yaml`)
 - Ensure the pod specifies the correct scheduler name
 - Check GPU resource availability with `kubectl describe node <gpu-node-name>`
+
+### GPU Sharing Issues
+
+If GPU sharing pods are rejected:
+- Verify KAI Scheduler has GPU sharing enabled:
+  ```bash
+  kubectl -n kai-scheduler get deployment binder -o json | grep -i gpu-sharing
+  # Should output: "--gpu-sharing-enabled=true"
+  ```
+- If GPU sharing is disabled, enable it:
+  ```bash
+  kubectl -n kai-scheduler patch deployment binder --type='json' \
+    -p='[{"op": "replace", "path": "/spec/template/spec/containers/0/args/4", "value": "--gpu-sharing-enabled=true"}]'
+  ```
+- Check for errors with:
+  ```bash
+  kubectl describe pod <pod-name>
+  ```
+- Common errors include:
+  - "cannot have both GPU fraction request and whole GPU resource request/limit" - Remove nvidia.com/gpu resource requests
+  - "attempting to create a pod with gpu sharing request, while GPU sharing is disabled" - Enable GPU sharing
+- Examine KAI Scheduler logs:
+  ```bash
+  kubectl -n kai-scheduler logs deployment/binder
+  kubectl -n kai-scheduler logs deployment/scheduler
+  ```
 
 ## Clean Up
 

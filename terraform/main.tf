@@ -26,12 +26,41 @@ data "google_storage_bucket" "artifact_store" {
   name = var.artifact_store_bucket_name
 }
 
-# Create a service connector for GCP
-resource "zenml_service_connector" "gcp_connector" {
-  name        = "gcp-${var.stack_name}"
-  type        = "gcp"
-  auth_method = "service-account"
+# Create a service connector for GCS
+resource "zenml_service_connector" "gcs" {
+  name          = "gcp-${var.stack_name}-gcs"
+  type          = "gcp"
+  auth_method   = "service-account"
+  resource_type = "gcs-bucket"
+  resource_id   = var.artifact_store_bucket_name
+  configuration = {
+    project_id           = var.project_id
+    service_account_json = file("keys/zenml-kai-scheduler.json")
+  }
 
+}
+
+# Create a service connector for GKE
+resource "zenml_service_connector" "gke" {
+  name          = "gcp-${var.stack_name}-gke"
+  type          = "gcp"
+  auth_method   = "service-account"
+  resource_type = "kubernetes-cluster"
+  resource_id   = var.existing_cluster_name
+  configuration = {
+    project_id           = var.project_id
+    service_account_json = file("keys/zenml-kai-scheduler.json")
+  }
+
+}
+
+# Create a service connector for GCR
+resource "zenml_service_connector" "gcr" {
+  name          = "gcp-${var.stack_name}-gcr"
+  type          = "gcp"
+  auth_method   = "service-account"
+  resource_type = "docker-registry"
+  resource_id   = var.container_registry_uri
   configuration = {
     project_id           = var.project_id
     service_account_json = file("keys/zenml-kai-scheduler.json")
@@ -49,7 +78,7 @@ resource "zenml_stack_component" "artifact_store" {
     path = "gs://${data.google_storage_bucket.artifact_store.name}"
   }
 
-  connector_id = zenml_service_connector.gcp_connector.id
+  connector_id = zenml_service_connector.gcs.id
 }
 
 # Register the GCP container registry component
@@ -62,12 +91,13 @@ resource "zenml_stack_component" "container_registry" {
     uri = var.container_registry_uri
   }
 
-  connector_id = zenml_service_connector.gcp_connector.id
+  connector_id = zenml_service_connector.gcr.id
 }
 
-# Register Kubernetes orchestrator with KAI Scheduler configuration
-resource "zenml_stack_component" "k8s_orchestrator" {
-  name   = "kai-kubernetes-${var.stack_name}"
+
+# Register a KAI Scheduler orchestrator with fractional GPU support
+resource "zenml_stack_component" "kai_gpu_sharing_orchestrator" {
+  name   = "kai-gpu-sharing-${var.stack_name}"
   type   = "orchestrator"
   flavor = "kubernetes"
 
@@ -75,16 +105,11 @@ resource "zenml_stack_component" "k8s_orchestrator" {
     kubernetes_context   = var.kubernetes_context
     kubernetes_namespace = "kai-test"
 
-    # KAI Scheduler configuration encoded as a JSON string
+    # KAI Scheduler configuration with GPU sharing (for reference)
     pod_settings = jsonencode({
       scheduler_name = "kai-scheduler"
-      labels = {
-        "runai/queue" = "test"
-      }
-      resources = {
-        limits = {
-          "nvidia.com/gpu" = "1"
-        }
+      annotations = {
+        "gpu-fraction" = "0.5" # Request 50% of GPU resources
       }
       tolerations = [
         {
@@ -97,15 +122,16 @@ resource "zenml_stack_component" "k8s_orchestrator" {
     })
   }
 
-  connector_id = zenml_service_connector.gcp_connector.id
+  connector_id = zenml_service_connector.gke.id
 }
 
-# Create a ZenML stack with the registered components
+
+# Create a second ZenML stack with the GPU sharing orchestrator
 resource "zenml_stack" "kai_stack" {
   name = var.stack_name
 
   components = {
-    orchestrator       = zenml_stack_component.k8s_orchestrator.id
+    orchestrator       = zenml_stack_component.kai_gpu_sharing_orchestrator.id
     artifact_store     = zenml_stack_component.artifact_store.id
     container_registry = zenml_stack_component.container_registry.id
   }

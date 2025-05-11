@@ -1,16 +1,33 @@
 import ctypes
-import os
 from ctypes import byref, c_int
 
+from kubernetes.client.models import V1Toleration
 from zenml import pipeline, step
 from zenml.config import DockerSettings
-
-# Get the current directory to build the Dockerfile with the correct path
-current_dir = os.path.dirname(os.path.abspath(__file__))
-dockerfile_path = os.path.join(current_dir, "Dockerfile.gpu")
+from zenml.integrations.kubernetes.flavors.kubernetes_orchestrator_flavor import (
+    KubernetesOrchestratorSettings,
+)
 
 # Use a custom Dockerfile that includes Python, pip, and ZenML
 docker_settings = DockerSettings(python_package_installer="uv")
+
+# Define Kubernetes settings for GPU resources using the KubernetesOrchestratorSettings
+kubernetes_settings = KubernetesOrchestratorSettings(
+    pod_settings={
+        "resources": {
+            "limits": {"nvidia.com/gpu": "1"},
+            "requests": {"nvidia.com/gpu": "1"},
+        },
+        "tolerations": [
+            V1Toleration(
+                key="nvidia.com/gpu",
+                operator="Equal",
+                value="present",
+                effect="NoSchedule",
+            )
+        ],
+    }
+)
 
 
 def has_cuda_gpu() -> bool:
@@ -31,7 +48,7 @@ def has_cuda_gpu() -> bool:
 
 
 # Define a GPU-enabled step with a shorter name
-@step(name="gpu_step")
+@step(name="gpu_step", settings={"orchestrator": kubernetes_settings})
 def gpu_test_step() -> None:
     try:
         # Try to run nvidia-smi to verify GPU access
@@ -52,16 +69,4 @@ def gpu_test_pipeline():
 
 
 if __name__ == "__main__":
-    # Get the active stack
-    from zenml.client import Client
-
-    client = Client()
-    active_stack = client.active_stack
-
-    if active_stack:
-        print(f"Using active stack: {active_stack.name}")
-        # Run the pipeline with active stack
-        gpu_test_pipeline()
-    else:
-        print("No active stack found.")
-        print("Please set up and activate a stack first")
+    gpu_test_pipeline()

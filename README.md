@@ -18,6 +18,9 @@ NVIDIA KAI Scheduler is specifically designed to optimize GPU resource allocatio
 - [kubectl](https://kubernetes.io/docs/tasks/tools/install-kubectl/) installed
 - [Helm](https://helm.sh/docs/intro/install/) installed
 - [ZenML](https://docs.zenml.io/getting-started/installation) (v0.52.0+) installed
+- **NVIDIA GPU Operator** or the GKE driver-installer DaemonSet
+  - Helm: `helm install gpu-operator nvidia/gpu-operator -n gpu-operator --create-namespace`
+  - GKE COS shortcut: `kubectl apply -f https://raw.githubusercontent.com/GoogleCloudPlatform/container-engine-accelerators/master/nvidia-driver-installer/cos/daemonset-preloaded.yaml`
 
 ## Step 1: Set Up NVIDIA KAI Scheduler
 
@@ -27,21 +30,17 @@ KAI Scheduler enables efficient GPU scheduling, including features like GPU shar
 
 ```bash
 # Add the NVIDIA Helm repository
-helm repo add nvidia https://helm.ngc.nvidia.com/nvidia
+helm repo add nvidia-k8s https://helm.ngc.nvidia.com/nvidia/k8s
 helm repo update
 
-# Install KAI Scheduler with GPU sharing enabled
-helm install kai-scheduler nvidia/kai-scheduler \
+# Install KAI Scheduler with GPU sharing and CDI enabled
+helm upgrade -i kai-scheduler nvidia-k8s/kai-scheduler \
   --create-namespace \
   --namespace kai-scheduler \
-  --set global.gpuSharing=true
+  --set global.registry=nvcr.io/nvidia/k8s \
+  --set global.gpuSharing=true \
+  --set binder.additionalArgs[0]="--cdi-enabled=true"
 ```
-
-> **Note**: If you've already installed KAI Scheduler without GPU sharing, you can enable it by patching the binder deployment:
-> ```bash
-> kubectl -n kai-scheduler patch deployment binder --type='json' \
->   -p='[{"op": "replace", "path": "/spec/template/spec/containers/0/args/4", "value": "--gpu-sharing-enabled=true"}]'
-> ```
 
 ### Verify KAI Scheduler Installation
 
@@ -52,6 +51,10 @@ kubectl get pods -n kai-scheduler
 # Verify GPU sharing is enabled
 kubectl -n kai-scheduler get deployment binder -o json | grep -i gpu-sharing
 # Should output: "--gpu-sharing-enabled=true"
+
+# Verify CDI is enabled
+kubectl -n kai-scheduler get deployment binder -o json | grep -i cdi
+# Should output: "--cdi-enabled=true"
 ```
 
 ### Configure Queues for Resource Allocation
@@ -108,6 +111,11 @@ kubectl get pods -n node-feature-discovery
 
 # Verify GPU nodes
 kubectl get nodes -l accelerator=nvidia-gpu
+
+# Verify GPU driver is available
+kubectl get pods -n nvidia-gpu-operator # If using GPU Operator
+# or
+kubectl get daemonsets -n kube-system nvidia-driver-installer # If using GKE driver installer
 ```
 
 ## Step 3: Run the GPU Test Pipeline
@@ -248,11 +256,13 @@ This repository includes the following Dockerfiles:
 
 During our setup process, we learned several important lessons:
 
-1. **GKE GPU Driver Management**: On GKE, GPU drivers are pre-installed and managed by the platform. Unlike other Kubernetes distributions, there's no need to install the NVIDIA GPU Operator.
+1. **GPU Driver Requirements**: There are two approaches to setting up GPU drivers:
+   - **GKE COS nodes**: Use Google's driver-installer DaemonSet
+   - **Ubuntu/RHEL nodes**: Install the NVIDIA GPU Operator
 
 2. **Node Feature Discovery**: NFD is essential for proper GPU detection and scheduling.
 
-3. **Queue Configuration**: KAI Scheduler requires queues to be defined as Kubernetes custom resources with the `scheduling.run.ai/v2` API type.
+3. **Queue Configuration**: KAI Scheduler requires queues to be defined as Kubernetes custom resources with the `scheduling.run.ai/v1` API type (verify with `kubectl api-resources | grep queue`).
 
 4. **Pod Requirements**: Pods must include both:
    - The correct queue label (`runai/queue: <queue-name>`)
@@ -261,7 +271,8 @@ During our setup process, we learned several important lessons:
 5. **GPU Sharing Requirements**:
    - GPU sharing must be explicitly enabled in KAI Scheduler
    - When using `gpu-fraction` or `gpu-memory` annotations, do NOT specify `nvidia.com/gpu` resource requests/limits
-   - GPU sharing requires KAI Scheduler pods to run with the `--gpu-sharing-enabled=true` argument
+   - Fractional GPUs work only when CDI is enabled (see install step)
+   - Pods need both `schedulerName: kai-scheduler` and `runai/queue` label
 
 ## Troubleshooting
 
@@ -281,10 +292,10 @@ If GPU sharing pods are rejected:
   kubectl -n kai-scheduler get deployment binder -o json | grep -i gpu-sharing
   # Should output: "--gpu-sharing-enabled=true"
   ```
-- If GPU sharing is disabled, enable it:
+- Check CDI is enabled:
   ```bash
-  kubectl -n kai-scheduler patch deployment binder --type='json' \
-    -p='[{"op": "replace", "path": "/spec/template/spec/containers/0/args/4", "value": "--gpu-sharing-enabled=true"}]'
+  kubectl -n kai-scheduler get deployment binder -o json | grep -i cdi
+  # Should output: "--cdi-enabled=true"
   ```
 - Check for errors with:
   ```bash
@@ -293,11 +304,20 @@ If GPU sharing pods are rejected:
 - Common errors include:
   - "cannot have both GPU fraction request and whole GPU resource request/limit" - Remove nvidia.com/gpu resource requests
   - "attempting to create a pod with gpu sharing request, while GPU sharing is disabled" - Enable GPU sharing
+  - "unable to initialize NVML" - Install the GPU Operator or driver-installer DaemonSet
+  - "no devices found" - Ensure CDI is enabled with `--cdi-enabled=true`
 - Examine KAI Scheduler logs:
   ```bash
   kubectl -n kai-scheduler logs deployment/binder
   kubectl -n kai-scheduler logs deployment/scheduler
   ```
+
+### NVML Issues
+
+If you encounter "unable to initialize NVML" errors:
+- This typically means the NVIDIA drivers aren't properly installed
+- For GKE COS nodes: Reapply the driver installer DaemonSet
+- For Ubuntu nodes: Verify the GPU Operator is properly installed
 
 ## Clean Up
 
@@ -313,7 +333,7 @@ This will remove all resources created by Terraform, including the GKE cluster a
 ## References
 
 - [ZenML Documentation](https://docs.zenml.io/)
-- [NVIDIA KAI Scheduler GitHub](https://github.com/NVIDIA/kai-scheduler)
+- [NVIDIA KAI Scheduler GitHub](https://github.com/NVIDIA/KAI-Scheduler)
 - [NVIDIA KAI Scheduler Documentation](https://docs.nvidia.com/kai-scheduler/index.html)
 - [Google Kubernetes Engine Documentation](https://cloud.google.com/kubernetes-engine/docs)
 - [Terraform GCP Provider Documentation](https://registry.terraform.io/providers/hashicorp/google/latest/docs)

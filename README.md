@@ -22,11 +22,68 @@ NVIDIA KAI Scheduler is specifically designed to optimize GPU resource allocatio
   - Helm: `helm install gpu-operator nvidia/gpu-operator -n gpu-operator --create-namespace`
   - GKE COS shortcut: `kubectl apply -f https://raw.githubusercontent.com/GoogleCloudPlatform/container-engine-accelerators/master/nvidia-driver-installer/cos/daemonset-preloaded.yaml`
 
-## Step 1: Set Up NVIDIA KAI Scheduler
+## Step 1: Set Up NVIDIA GPU Operator and KAI Scheduler
 
 KAI Scheduler enables efficient GPU scheduling, including features like GPU sharing, which allows multiple workloads to share the same GPU.
 
-### Install KAI Scheduler with Helm
+### Install NVIDIA GPU Operator
+
+First, create a namespace and resource quota for the GPU operator:
+
+```bash
+kubectl apply -f - <<EOF
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: gpu-operator
+---
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: gpu-operator-quota
+  namespace: gpu-operator
+spec:
+  hard:
+    pods: 100
+  scopeSelector:
+    matchExpressions:
+    - operator: In
+      scopeName: PriorityClass
+      values:
+        - system-node-critical
+        - system-cluster-critical
+EOF
+```
+
+Apply the NVIDIA driver installer for GKE COS nodes:
+
+```bash
+kubectl apply -f https://raw.githubusercontent.com/GoogleCloudPlatform/container-engine-accelerators/master/nvidia-driver-installer/cos/daemonset-preloaded.yaml
+```
+
+Install the NVIDIA GPU Operator with Helm:
+
+```bash
+helm install --wait --generate-name \
+    -n gpu-operator \
+    nvidia/gpu-operator \
+    --version=v25.3.0 \
+    --set hostPaths.driverInstallDir=/home/kubernetes/bin/nvidia \
+    --set toolkit.installDir=/home/kubernetes/bin/nvidia \
+    --set cdi.enabled=true \
+    --set cdi.default=true \
+    --set driver.enabled=false
+```
+
+Verify the GPU Operator installation:
+
+```bash
+kubectl get pods -n gpu-operator
+```
+
+All pods should be in a Running state (except for the nvidia-cuda-validator which should be Completed).
+
+### Install KAI Scheduler with GPU Sharing Enabled
 
 ```bash
 # Add the NVIDIA Helm repository
@@ -35,10 +92,9 @@ helm repo update
 
 # Install KAI Scheduler with GPU sharing and CDI enabled
 helm upgrade -i kai-scheduler nvidia-k8s/kai-scheduler \
-  --create-namespace \
-  --namespace kai-scheduler \
-  --set global.registry=nvcr.io/nvidia/k8s \
-  --set global.gpuSharing=true \
+  -n kai-scheduler --create-namespace \
+  --set "global.registry=nvcr.io/nvidia/k8s" \
+  --set "global.gpuSharing=true" \
   --set binder.additionalArgs[0]="--cdi-enabled=true"
 ```
 
@@ -47,23 +103,55 @@ helm upgrade -i kai-scheduler nvidia-k8s/kai-scheduler \
 ```bash
 # Check the KAI Scheduler pods
 kubectl get pods -n kai-scheduler
-
-# Verify GPU sharing is enabled
-kubectl -n kai-scheduler get deployment binder -o json | grep -i gpu-sharing
-# Should output: "--gpu-sharing-enabled=true"
-
-# Verify CDI is enabled
-kubectl -n kai-scheduler get deployment binder -o json | grep -i cdi
-# Should output: "--cdi-enabled=true"
 ```
+
+You should see three pods: binder, podgrouper, and scheduler, all in the Running state.
 
 ### Configure Queues for Resource Allocation
 
-KAI Scheduler uses a hierarchical queue system:
+KAI Scheduler requires a queue configuration for workload management:
 
 ```bash
-# Apply queue configuration
-kubectl apply -f queues.yaml
+kubectl apply -f - <<EOF
+apiVersion: scheduling.run.ai/v2
+kind: Queue
+metadata:
+  name: default
+spec:
+  resources:
+    cpu:
+      quota: -1
+      limit: -1
+      overQuotaWeight: 1
+    gpu:
+      quota: -1
+      limit: -1
+      overQuotaWeight: 1
+    memory:
+      quota: -1
+      limit: -1
+      overQuotaWeight: 1
+---
+apiVersion: scheduling.run.ai/v2
+kind: Queue
+metadata:
+  name: test
+spec:
+  parentQueue: default
+  resources:
+    cpu:
+      quota: -1
+      limit: -1
+      overQuotaWeight: 1
+    gpu:
+      quota: -1
+      limit: -1
+      overQuotaWeight: 1
+    memory:
+      quota: -1
+      limit: -1
+      overQuotaWeight: 1
+EOF
 ```
 
 ## Step 2: Deploy Infrastructure with Terraform
@@ -120,23 +208,7 @@ kubectl get daemonsets -n kube-system nvidia-driver-installer # If using GKE dri
 
 ## Step 3: Run the GPU Test Pipeline
 
-After deploying the infrastructure, run the included GPU test pipeline to verify everything works correctly:
-
-### Register ZenML Stack Components
-
-```bash
-# Navigate to terraform directory to get outputs
-cd terraform
-
-# Register the stack with the deployed infrastructure
-zenml stack register --name kai-gcp-stack \
-  --orchestrator kubernetes \
-  --artifact_store gcp \
-  --container_registry gcp
-
-# Set it as the active stack
-zenml stack set kai-gcp-stack
-```
+After deploying the infrastructure, run the included GPU test pipeline to verify everything works correctly.
 
 ### Run the Test Pipeline
 
@@ -145,7 +217,12 @@ zenml stack set kai-gcp-stack
 cd ..
 
 # Build the Docker image used by the pipeline (using Dockerfile.pytorch)
-docker build -t strickvl/pytorch-zenml-gpu:root -f Dockerfile.pytorch .
+# NOTE: Replace "yourusername" with your own Docker Hub username or container registry prefix
+docker build -t yourusername/pytorch-zenml-gpu:root -f Dockerfile.pytorch .
+docker push yourusername/pytorch-zenml-gpu:root
+
+# IMPORTANT: After building and pushing the image, update the parent_image in gpu_pipeline.py 
+# to match your username instead of "strickvl/"
 
 # Run the GPU test pipeline
 python gpu_pipeline.py
@@ -165,20 +242,62 @@ Pipeline run completed successfully!
 
 ## GPU Sharing Configuration Options
 
-KAI Scheduler supports multiple approaches for GPU sharing:
+KAI Scheduler supports multiple approaches for GPU sharing. Our implementation in gpu_pipeline.py uses the following configuration:
 
-### 1. Using Fractional GPU (50% of a GPU)
+### Current Implementation (Fractional GPU with Node Targeting)
 
 ```python
 kubernetes_settings = KubernetesOrchestratorSettings(
     pod_settings={
-        # When using KAI Scheduler with gpu-fraction, we don't specify
-        # nvidia.com/gpu in the resources section
+        # Add tolerations for GPU nodes
         "tolerations": [
             V1Toleration(
                 key="nvidia.com/gpu",
-                operator="Equal",
-                value="present",
+                operator="Exists",
+                effect="NoSchedule",
+            )
+        ],
+        "scheduler_name": "kai-scheduler",
+        # Labels for KAI Scheduler
+        "labels": {
+            "runai/queue": "test"  # Required for KAI Scheduler
+        },
+        "annotations": {
+            "gpu-fraction": "0.5",  # Use 50% of GPU resources
+            "gpu-type": "nvidia-tesla-t4",  # Explicitly request T4 GPU type
+        },
+        "node_selector": {
+            "cloud.google.com/gke-accelerator": "nvidia-tesla-t4",  # Target T4 GPU nodes
+            "cloud.google.com/gke-nodepool": "gpu-pool",  # Target specific GPU node pool
+        },
+        # Add environment variables for NVIDIA GPU compatibility
+        "container_environment": {
+            "NVIDIA_DRIVER_CAPABILITIES": "all",
+            "NVIDIA_REQUIRE_CUDA": "cuda>=12.2",
+        },
+        # Add CPU and memory resources but no GPU (KAI will handle that via annotation)
+        "resources": {
+            "requests": {"cpu": "500m", "memory": "1Gi"},
+            "limits": {"memory": "2Gi"},
+        },
+        # Add security context to allow wider device access
+        "security_context": {"privileged": True},
+    }
+)
+```
+
+### Alternative: Using Specific GPU Memory (e.g., 5120 MiB)
+
+Instead of using gpu-fraction, you can specify an exact amount of GPU memory:
+
+```python
+kubernetes_settings = KubernetesOrchestratorSettings(
+    pod_settings={
+        # Add tolerations for GPU nodes
+        "tolerations": [
+            V1Toleration(
+                key="nvidia.com/gpu",
+                operator="Exists",
                 effect="NoSchedule",
             )
         ],
@@ -187,70 +306,36 @@ kubernetes_settings = KubernetesOrchestratorSettings(
             "runai/queue": "test"  # Required for KAI Scheduler
         },
         "annotations": {
-            "gpu-fraction": "0.5"  # Use 50% of GPU resources
+            "gpu-memory": "5120",  # Request 5120 MiB of GPU memory
+            "gpu-type": "nvidia-tesla-t4",  # Explicitly request T4 GPU type
         },
+        # Other settings remain the same
+        "node_selector": {
+            "cloud.google.com/gke-accelerator": "nvidia-tesla-t4",
+            "cloud.google.com/gke-nodepool": "gpu-pool",
+        },
+        "container_environment": {
+            "NVIDIA_DRIVER_CAPABILITIES": "all",
+            "NVIDIA_REQUIRE_CUDA": "cuda>=12.2",
+        },
+        "resources": {
+            "requests": {"cpu": "500m", "memory": "1Gi"},
+            "limits": {"memory": "2Gi"},
+        },
+        "security_context": {"privileged": True},
     }
 )
-```
-
-### 2. Using Specific GPU Memory (e.g., 2000 MiB)
-
-```python
-kubernetes_settings = KubernetesOrchestratorSettings(
-    pod_settings={
-        # When using KAI Scheduler with gpu-memory, we don't specify
-        # nvidia.com/gpu in the resources section
-        "tolerations": [
-            V1Toleration(
-                key="nvidia.com/gpu",
-                operator="Equal",
-                value="present",
-                effect="NoSchedule",
-            )
-        ],
-        "scheduler_name": "kai-scheduler",
-        "labels": {
-            "runai/queue": "test"  # Required for KAI Scheduler
-        },
-        "annotations": {
-            "gpu-memory": "2000"  # Request 2000 MiB of GPU memory
-        },
-    }
-)
-```
-
-## Test Jobs and Examples
-
-This repository includes several example job specifications:
-
-1. **GPU Test Job** (`gpu-test-job.yaml`): A simple job that runs `nvidia-smi` to verify GPU access
-2. **Fractional GPU Test Job** (`gpu-test-job-fractional.yaml`): Tests 50% GPU sharing
-3. **GPU Memory Test Job** (`gpu-test-job-memory.yaml`): Tests specific GPU memory allocation
-4. **ML Training Job** (`ml-training-job.yaml`): A PyTorch training job that uses GPU resources
-5. **Model Serving Deployment** (`model-serving-deployment.yaml`): A deployment for serving ML models
-
-To run a test job:
-
-```bash
-kubectl apply -f gpu-test-job.yaml
 ```
 
 ## Infrastructure Overview
 
-The Terraform configuration in this repository creates:
+The Terraform configuration in this repository registers your Kubernetes cluster
+with ZenML. You'll need to pass in your own tfvars file to configure the
+variables passed to Terraform.
 
-- A GKE cluster with regular CPU nodes for system workloads
-- A dedicated GPU node pool with NVIDIA T4 GPUs
-- Node Feature Discovery (NFD) for hardware feature detection
-- KAI Scheduler deployment
-- A GCS bucket for artifact storage
+### Docker Image
 
-### Docker Images
-
-This repository includes the following Dockerfiles:
-
-- **Dockerfile.pytorch**: Creates the base PyTorch image `strickvl/pytorch-zenml-gpu:root` used in the GPU test pipeline. This image includes CUDA, PyTorch, and ZenML dependencies required for GPU workloads.
-- **Dockerfile.gpu**: Another GPU-enabled image option for specialized use cases.
+This repository includes **Dockerfile.pytorch** which creates the base PyTorch image used in the GPU test pipeline. This image includes CUDA, PyTorch, and ZenML dependencies required for GPU workloads.
 
 ## Key Learnings and Best Practices
 
@@ -319,16 +404,10 @@ If you encounter "unable to initialize NVML" errors:
 - For GKE COS nodes: Reapply the driver installer DaemonSet
 - For Ubuntu nodes: Verify the GPU Operator is properly installed
 
-## Clean Up
+## Acknowledgments
 
-To tear down the infrastructure:
-
-```bash
-cd terraform
-terraform destroy
-```
-
-This will remove all resources created by Terraform, including the GKE cluster and associated components.
+The installation instructions for NVIDIA GPU Operator and KAI Scheduler are adapted from the excellent article by Exostellar:
+- [GPU Sharing in Kubernetes: NVIDIA KAI vs Exostellar SDG](https://exostellar.io/2025/04/08/gpu-sharing-in-kubernetes-nvidia-kai-vs-exostellar-sdg/)
 
 ## References
 
@@ -336,4 +415,5 @@ This will remove all resources created by Terraform, including the GKE cluster a
 - [NVIDIA KAI Scheduler GitHub](https://github.com/NVIDIA/KAI-Scheduler)
 - [NVIDIA KAI Scheduler Documentation](https://docs.nvidia.com/kai-scheduler/index.html)
 - [Google Kubernetes Engine Documentation](https://cloud.google.com/kubernetes-engine/docs)
-- [Terraform GCP Provider Documentation](https://registry.terraform.io/providers/hashicorp/google/latest/docs)
+- [Terraform GCP Provider
+  Documentation](https://registry.terraform.io/providers/hashicorp/google/latest/docs)

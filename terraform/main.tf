@@ -111,8 +111,8 @@ resource "zenml_stack_component" "kai_gpu_sharing_orchestrator" {
       annotations = {
         "gpu-fraction" = "0.5" # Request 50% of GPU resources
       }
-      "labels" : {
-        "runai/queue" : "test" # Required for KAI Scheduler
+      "labels" = {
+        "runai/queue" = "test" # Required for KAI Scheduler
       },
       tolerations = [
         {

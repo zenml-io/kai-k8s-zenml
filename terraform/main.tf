@@ -103,9 +103,9 @@ resource "zenml_stack_component" "kai_gpu_sharing_orchestrator" {
 
   configuration = {
     kubernetes_context   = var.kubernetes_context
-    kubernetes_namespace = "kai-test"
+    kubernetes_namespace = "default"
 
-    # KAI Scheduler configuration with GPU sharing (for reference)
+    # KAI Scheduler configuration with GPU sharing
     pod_settings = jsonencode({
       scheduler_name = "kai-scheduler"
       annotations = {
@@ -121,7 +121,14 @@ resource "zenml_stack_component" "kai_gpu_sharing_orchestrator" {
           value    = "present"
           effect   = "NoSchedule"
         }
-      ]
+      ],
+      node_selector = {
+        "cloud.google.com/gke-accelerator" = "nvidia-tesla-t4" # Target T4 GPU nodes
+      },
+      container_environment = {
+        "NVIDIA_DRIVER_CAPABILITIES" = "compute,utility",
+        "NVIDIA_REQUIRE_CUDA"       = "cuda>=11.0"
+      }
     })
   }
 

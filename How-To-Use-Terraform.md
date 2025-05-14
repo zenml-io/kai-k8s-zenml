@@ -92,29 +92,13 @@ kubectl get nodes -l accelerator=nvidia-gpu
 
 ## Step 8: Using ZenML with KAI Scheduler
 
-1. Register the created cluster with ZenML:
+The ZenML stack has been automatically registered by Terraform. You can check the registered stack with:
 
 ```bash
-zenml stack register --name kai-gcp-stack \
-  --orchestrator kubernetes \
-  --artifact_store gcp \
-  --container_registry gcp
+zenml stack describe $(terraform output -raw stack_name)
 ```
 
-2. Configure ZenML components:
-
-```bash
-zenml orchestrator register kai-k8s \
-  --provider=kubernetes \
-  --kubernetes_namespace=zenml \
-  --kubernetes_context=<get context from kubectl config current-context>
-
-zenml artifact_store register kai-gcs \
-  --provider=gcp \
-  --path=gs://$(terraform output -raw gcs_bucket_name)
-```
-
-3. Configure GPU steps in ZenML pipelines:
+Configure GPU steps in ZenML pipelines:
 
 When defining ZenML steps that need GPU resources, use the KAI Scheduler annotations:
 

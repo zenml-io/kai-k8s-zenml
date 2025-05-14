@@ -188,6 +188,8 @@ $(terraform output -raw kubectl_command)
 $(terraform output -raw apply_queue_config_command)
 ```
 
+The Terraform configuration will automatically register your ZenML stack.
+
 ### Verify the Installation
 
 ```bash

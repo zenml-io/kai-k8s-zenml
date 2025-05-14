@@ -3,7 +3,14 @@ import os
 import subprocess
 from ctypes import byref, c_int
 
+import torch
+import torch.nn as nn
+import torch.optim as optim
 from kubernetes.client.models import V1Toleration
+from sklearn.datasets import load_iris
+from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import StandardScaler
+from torch.utils.data import DataLoader, TensorDataset
 from zenml import pipeline, step
 from zenml.config import DockerSettings
 from zenml.integrations.kubernetes.flavors.kubernetes_orchestrator_flavor import (
@@ -144,49 +151,113 @@ def has_cuda_gpu() -> bool:
     return False
 
 
-# Define a GPU-enabled step with a shorter name
-@step(name="gpu_step", settings={"orchestrator": kubernetes_settings})
-def gpu_test_step() -> None:
-    try:
-        # Print environment for debugging
-        print("\nChecking for GPU access in KAI Scheduler environment...")
-        print(f"Current working directory: {os.getcwd()}")
+# Define a simple PyTorch model for Iris classification
+class IrisModel(nn.Module):
+    def __init__(self, input_size=4, hidden_size=10, num_classes=3):
+        super(IrisModel, self).__init__()
+        self.layer1 = nn.Linear(input_size, hidden_size)
+        self.relu = nn.ReLU()
+        self.layer2 = nn.Linear(hidden_size, num_classes)
 
-        # Check if we have /dev/nvidia* devices
-        try:
-            nvidia_devices = [d for d in os.listdir("/dev") if d.startswith("nvidia")]
-            if nvidia_devices:
-                print(f"Found nvidia devices in /dev: {', '.join(nvidia_devices)}")
-            else:
-                print("No nvidia devices found in /dev directory")
-        except Exception as e:
-            print(f"Error checking /dev for nvidia devices: {e}")
+    def forward(self, x):
+        x = self.layer1(x)
+        x = self.relu(x)
+        x = self.layer2(x)
+        return x
 
-        # Try to run nvidia-smi to verify GPU access
-        try:
-            # Try direct nvidia-smi command
-            nvidia_result = subprocess.run(
-                ["nvidia-smi"],
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True,
-                timeout=5,
+
+# Define a GPU-enabled step for training PyTorch model on Iris dataset
+@step(name="train_iris_model", settings={"orchestrator": kubernetes_settings})
+def train_model_with_gpu() -> nn.Module:
+    # Print environment for debugging
+    print("\nPreparing to train PyTorch model on Iris dataset...")
+    print(f"Current working directory: {os.getcwd()}")
+
+    # Check GPU availability
+    gpu_available = has_cuda_gpu()
+    print(f"GPU is available: {gpu_available}")
+    device = torch.device(
+        "cuda" if gpu_available and torch.cuda.is_available() else "cpu"
+    )
+    print(f"Using device: {device}")
+
+    if device.type == "cuda":
+        print(f"CUDA Device: {torch.cuda.get_device_name(0)}")
+        print(f"CUDA Device Count: {torch.cuda.device_count()}")
+        print(f"CUDA Version: {torch.version.cuda}")
+
+    # Load and preprocess Iris dataset
+    X, y = load_iris(return_X_y=True)
+
+    # Split data into train and test sets
+    X_train, X_test, y_train, y_test = train_test_split(
+        X, y, test_size=0.2, random_state=42
+    )
+
+    # Standardize features
+    scaler = StandardScaler()
+    X_train = scaler.fit_transform(X_train)
+    X_test = scaler.transform(X_test)
+
+    # Convert to PyTorch tensors
+    X_train_tensor = torch.FloatTensor(X_train)
+    y_train_tensor = torch.LongTensor(y_train)
+    X_test_tensor = torch.FloatTensor(X_test)
+    y_test_tensor = torch.LongTensor(y_test)
+
+    # Move data to device
+    X_train_tensor = X_train_tensor.to(device)
+    y_train_tensor = y_train_tensor.to(device)
+    X_test_tensor = X_test_tensor.to(device)
+    y_test_tensor = y_test_tensor.to(device)
+
+    # Create dataset and dataloader
+    train_dataset = TensorDataset(X_train_tensor, y_train_tensor)
+    train_loader = DataLoader(train_dataset, batch_size=8, shuffle=True)
+
+    # Initialize model
+    model = IrisModel()
+    model.to(device)
+
+    # Define loss function and optimizer
+    criterion = nn.CrossEntropyLoss()
+    optimizer = optim.Adam(model.parameters(), lr=0.001)
+
+    # Training loop
+    epochs = 100
+    for epoch in range(epochs):
+        model.train()
+        running_loss = 0.0
+
+        for inputs, labels in train_loader:
+            optimizer.zero_grad()
+            outputs = model(inputs)
+            loss = criterion(outputs, labels)
+            loss.backward()
+            optimizer.step()
+            running_loss += loss.item()
+
+        if (epoch + 1) % 20 == 0:
+            print(
+                f"Epoch {epoch + 1}/{epochs}, Loss: {running_loss / len(train_loader):.4f}"
             )
-            if nvidia_result.returncode == 0:
-                print("\nnvidia-smi output:\n" + nvidia_result.stdout)
-            else:
-                print(f"nvidia-smi failed with error: {nvidia_result.stderr}")
-        except Exception as e:
-            print(f"Failed to run nvidia-smi: {e}")
 
-        # Try our comprehensive GPU detection
-        output = has_cuda_gpu()
-        print(f"\nGPU is available: {output}")
-    except Exception as e:
-        print(f"Error accessing GPU: {e}")
-        import traceback
+    # Evaluate model
+    model.eval()
+    with torch.no_grad():
+        train_outputs = model(X_train_tensor)
+        _, train_preds = torch.max(train_outputs, 1)
+        train_acc = (train_preds == y_train_tensor).float().mean()
 
-        traceback.print_exc()
+        test_outputs = model(X_test_tensor)
+        _, test_preds = torch.max(test_outputs, 1)
+        test_acc = (test_preds == y_test_tensor).float().mean()
+
+    print(f"\nTraining complete!")
+    print(f"Train accuracy: {train_acc.item():.4f}")
+    print(f"Test accuracy: {test_acc.item():.4f}")
+
+    return model
 
 
 # Use shorter pipeline name
@@ -196,7 +267,7 @@ def gpu_test_step() -> None:
     enable_cache=False,
 )
 def gpu_test_pipeline():
-    gpu_test_step()
+    train_model_with_gpu()
 
 
 if __name__ == "__main__":

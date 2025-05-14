@@ -166,27 +166,23 @@ class IrisModel(nn.Module):
         return x
 
 
-# Define a GPU-enabled step for training PyTorch model on Iris dataset
-@step(name="train_iris_model", settings={"orchestrator": kubernetes_settings})
-def train_model_with_gpu() -> nn.Module:
-    # Print environment for debugging
-    print("\nPreparing to train PyTorch model on Iris dataset...")
-    print(f"Current working directory: {os.getcwd()}")
+@step(name="load_iris_dataset")
+def load_iris_dataset() -> tuple[
+    torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor
+]:
+    """
+    Load, preprocess, and split the Iris dataset into training and testing sets.
 
-    # Check GPU availability
-    gpu_available = has_cuda_gpu()
-    print(f"GPU is available: {gpu_available}")
-    device = torch.device(
-        "cuda" if gpu_available and torch.cuda.is_available() else "cpu"
-    )
-    print(f"Using device: {device}")
+    Returns:
+        Tuple containing:
+        - X_train_tensor: Training features as PyTorch tensor
+        - X_test_tensor: Testing features as PyTorch tensor
+        - y_train_tensor: Training labels as PyTorch tensor
+        - y_test_tensor: Testing labels as PyTorch tensor
+    """
+    print("Loading and preprocessing Iris dataset...")
 
-    if device.type == "cuda":
-        print(f"CUDA Device: {torch.cuda.get_device_name(0)}")
-        print(f"CUDA Device Count: {torch.cuda.device_count()}")
-        print(f"CUDA Version: {torch.version.cuda}")
-
-    # Load and preprocess Iris dataset
+    # Load dataset
     X, y = load_iris(return_X_y=True)
 
     # Split data into train and test sets
@@ -204,6 +200,50 @@ def train_model_with_gpu() -> nn.Module:
     y_train_tensor = torch.LongTensor(y_train)
     X_test_tensor = torch.FloatTensor(X_test)
     y_test_tensor = torch.LongTensor(y_test)
+
+    print(
+        f"Dataset prepared: {len(X_train_tensor)} training samples, {len(X_test_tensor)} testing samples"
+    )
+
+    return X_train_tensor, X_test_tensor, y_train_tensor, y_test_tensor
+
+
+# Define a GPU-enabled step for training PyTorch model on Iris dataset
+@step(name="train_iris_model", settings={"orchestrator": kubernetes_settings})
+def train_model_with_gpu(
+    X_train_tensor: torch.Tensor,
+    X_test_tensor: torch.Tensor,
+    y_train_tensor: torch.Tensor,
+    y_test_tensor: torch.Tensor,
+) -> nn.Module:
+    """
+    Train a PyTorch model on the Iris dataset using GPU if available.
+
+    Args:
+        X_train_tensor: Training features as PyTorch tensor
+        X_test_tensor: Testing features as PyTorch tensor
+        y_train_tensor: Training labels as PyTorch tensor
+        y_test_tensor: Testing labels as PyTorch tensor
+
+    Returns:
+        Trained PyTorch neural network model
+    """
+    # Print environment for debugging
+    print("\nPreparing to train PyTorch model on Iris dataset...")
+    print(f"Current working directory: {os.getcwd()}")
+
+    # Check GPU availability
+    gpu_available = has_cuda_gpu()
+    print(f"GPU is available: {gpu_available}")
+    device = torch.device(
+        "cuda" if gpu_available and torch.cuda.is_available() else "cpu"
+    )
+    print(f"Using device: {device}")
+
+    if device.type == "cuda":
+        print(f"CUDA Device: {torch.cuda.get_device_name(0)}")
+        print(f"CUDA Device Count: {torch.cuda.device_count()}")
+        print(f"CUDA Version: {torch.version.cuda}")
 
     # Move data to device
     X_train_tensor = X_train_tensor.to(device)
@@ -267,7 +307,12 @@ def train_model_with_gpu() -> nn.Module:
     enable_cache=False,
 )
 def gpu_test_pipeline():
-    train_model_with_gpu()
+    """GPU-accelerated pipeline for training a PyTorch model on the Iris dataset."""
+    # Load and preprocess the Iris dataset
+    X_train, X_test, y_train, y_test = load_iris_dataset()
+
+    # Train the model using GPU acceleration
+    train_model_with_gpu(X_train, X_test, y_train, y_test)
 
 
 if __name__ == "__main__":

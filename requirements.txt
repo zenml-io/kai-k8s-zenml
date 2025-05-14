@@ -1,1 +1,3 @@
 zenml==0.82.0
+torch
+scikit-learn

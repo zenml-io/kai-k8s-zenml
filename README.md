@@ -18,6 +18,13 @@ NVIDIA KAI Scheduler is specifically designed to optimize GPU resource allocatio
 - [kubectl](https://kubernetes.io/docs/tasks/tools/install-kubectl/) installed
 - [Helm](https://helm.sh/docs/intro/install/) installed
 - [ZenML](https://docs.zenml.io/getting-started/installation) (v0.52.0+) installed
+- PyTorch and scikit-learn integrations installed for ZenML:
+  ```bash
+  # Install required ZenML integrations
+  zenml integration install pytorch sklearn
+  # Alternatively, you can install from requirements.txt
+  pip install -r requirements.txt
+  ```
 - **NVIDIA GPU Operator** or the GKE driver-installer DaemonSet
   - Helm: `helm install gpu-operator nvidia/gpu-operator -n gpu-operator --create-namespace`
   - GKE COS shortcut: `kubectl apply -f https://raw.githubusercontent.com/GoogleCloudPlatform/container-engine-accelerators/master/nvidia-driver-installer/cos/daemonset-preloaded.yaml`
@@ -158,6 +165,15 @@ EOF
 
 For detailed instructions, see [How-To-Use-Terraform.md](How-To-Use-Terraform.md).
 
+### New: Automatic Resource Provisioning
+
+Our enhanced Terraform configuration now automatically provisions GCS buckets and Google Container Registry resources. Key features include:
+
+- **Automatic Resource Creation**: Creates GCS bucket and Artifact Registry with unique names
+- **Flexible Authentication**: Supports service account keys, workload identity, and application default credentials
+- **Service Account Management**: Optionally creates a dedicated service account with proper permissions
+- **Configurable GPU Settings**: Easily customize GPU sharing parameters
+
 ### Set up GCP Authentication and Configure Terraform
 
 ```bash
@@ -177,6 +193,19 @@ terraform init
 terraform plan  # Review the planned changes
 terraform apply # Deploy the infrastructure
 ```
+
+> **Important Note:** If you're using an existing service account (rather than creating a new one), ensure it has the necessary permissions:
+> - `roles/storage.admin` for GCS buckets
+> - `roles/artifactregistry.admin` for Artifact Registry
+> - `roles/container.developer` for GKE access
+> 
+> Without these permissions, service connector creation may fail with authorization errors.
+
+After deployment completes, you'll see a detailed summary of all created resources including:
+- GCS bucket information
+- Container registry URI
+- Service account details (if created)
+- ZenML stack configuration
 
 ### Configure kubectl and Queue System
 
@@ -331,13 +360,45 @@ kubernetes_settings = KubernetesOrchestratorSettings(
 
 ## Infrastructure Overview
 
-The Terraform configuration in this repository registers your Kubernetes cluster
-with ZenML. You'll need to pass in your own tfvars file to configure the
-variables passed to Terraform.
+The Terraform configuration in this repository has been enhanced to provide a complete infrastructure solution:
+
+> **Note:** This implementation is currently specific to Google Cloud Platform (GCP). If you wish to use AWS, Azure, or another cloud provider, you will need to adapt the Terraform configuration and Docker setup accordingly. The core KAI Scheduler functionality should work on any Kubernetes cluster with NVIDIA GPUs.
+
+1. **GCS Bucket Creation**: Automatically creates a GCS bucket for ZenML artifacts with:
+   - Configurable naming with unique suffixes
+   - Lifecycle rules for artifact retention
+   - Versioning support
+   - Access control configuration
+
+2. **Container Registry**: Creates a Google Artifact Registry for storing container images with:
+   - Regional deployment matching your GKE cluster
+   - Docker format support
+   - Unique naming to avoid conflicts
+
+3. **Service Account Management**:
+   - Optional creation of a dedicated service account
+   - Least-privilege permissions for GCS, Artifact Registry, and GKE
+   - Support for different authentication methods
+   - Secure key management and distribution
+
+4. **ZenML Integration**:
+   - Automatic stack registration with all components
+   - Configurable KAI Scheduler settings
+   - Support for GPU sharing parameters
+   - Descriptive stack and component labels
 
 ### Docker Image
 
-This repository includes **Dockerfile.pytorch** which creates the base PyTorch image used in the GPU test pipeline. This image includes CUDA, PyTorch, and ZenML dependencies required for GPU workloads.
+This repository includes **Dockerfile.pytorch** which creates the base PyTorch image used in the GPU test pipeline. This image includes:
+
+- CUDA 12.1 and cuDNN 8 for GPU acceleration 
+- PyTorch 2.2.0 for deep learning
+- scikit-learn for machine learning tasks
+- ZenML and its GCP dependencies
+- Kubernetes client libraries
+- Various Google Cloud SDKs
+
+The Dockerfile is optimized for GCP environments but can be adapted for other cloud providers by modifying the included dependencies.
 
 ## Key Learnings and Best Practices
 

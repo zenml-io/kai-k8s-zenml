@@ -3,24 +3,91 @@ project_id = "your-gcp-project-id"
 region     = "us-central1"
 zone       = "us-central1-a"
 
-# Main Cluster Node Pool Configuration
-node_pool_machine_type = "e2-standard-4"
-node_pool_min_count    = 1
-node_pool_max_count    = 3
+# ZenML Stack Configuration
+stack_name = "kai-gcp-stack"
 
-# GPU Node Configuration
-gpu_node_count         = 1
-gpu_node_machine_type  = "n1-standard-4"
-gpu_type               = "nvidia-tesla-t4"
-gpu_count_per_node     = 1
+# Kubernetes Configuration
+existing_cluster_name = "zenml-kai-cluster"
+kubernetes_context    = "gke_your-gcp-project-id_us-central1-a_zenml-kai-cluster"
+kubernetes_namespace  = "default"
 
+#---------------------------------------
 # KAI Scheduler Configuration
-kai_scheduler_version  = "v0.5.0"
+#---------------------------------------
 
+# Fraction of GPU resources to request (between 0.0 and 1.0)
+gpu_fraction = "0.5"
+
+# KAI Scheduler queue name
+kai_scheduler_queue = "test"
+
+# GPU type to target in node selector
+gpu_type = "nvidia-tesla-t4"
+
+# Resource Creation Control
+# Set to true to automatically create GCS bucket and Artifact Registry (recommended)
+# Set to false to use existing resources
+create_resources = true
+
+#---------------------------------------
 # Storage Configuration
-artifact_store_bucket_name = "zenml-kai-artifacts"
-bucket_versioning_enabled  = true
+#---------------------------------------
 
-# Authentication
-# For development/testing, we use OAuth2 authentication
-# Run 'gcloud auth application-default login' to authenticate
+# Option 1: Auto-generated bucket (when create_resources = true)
+# Leave artifact_store_bucket_name with default value for auto-generation
+
+# Option 2: Specify exact bucket name to create (when create_resources = true)
+# artifact_store_bucket_name = "my-custom-zenml-artifacts"
+
+# Option 3: Use existing bucket (when create_resources = false)
+# artifact_store_bucket_name = "existing-bucket-name"
+
+# Bucket Configuration
+bucket_versioning_enabled = true
+bucket_storage_class      = "STANDARD"
+bucket_retention_days     = 30
+bucket_uniform_access     = true
+
+#---------------------------------------
+# Container Registry Configuration
+#---------------------------------------
+
+# Option 1: Auto-generated Artifact Registry (when create_resources = true)
+# Leave container_registry_uri and container_registry_id with default values
+
+# Option 2: Specify custom repository ID (when create_resources = true)
+# container_registry_id = "my-zenml-repository"
+
+# Option 3: Use existing Container Registry (when create_resources = false)
+# container_registry_uri = "gcr.io/your-gcp-project-id/zenml"
+
+#---------------------------------------
+# Service Account Configuration
+#---------------------------------------
+
+# Create a new service account for ZenML
+create_service_account = false
+
+# Service account name (only used when create_service_account = true)
+# A random suffix will be added automatically
+service_account_id = "zenml-service-account"
+
+# Generate a new key for the service account (only used when create_service_account = true)
+generate_service_account_key = true
+
+# Path to save the generated key file (only used when generate_service_account_key = true)
+# Leave empty to skip saving to file
+# output_service_account_key_file = "keys/generated-zenml-sa-key.json"
+
+# Authentication method: service-account, implicit, user-account, external-account, oauth2-token, impersonation
+auth_method = "service-account"
+
+# Authentication option 1: Use existing key file path
+service_account_key_file = "keys/zenml-kai-scheduler.json"
+
+# Authentication option 2: Specify custom key file path
+# service_account_key_file = "/path/to/your/service-account-key.json"
+
+# Authentication option 3: Provide service account key content directly
+# Uncomment and replace with your base64-encoded service account key JSON
+# service_account_key_content = "eyJ0eXBlIjoic2VydmljZV9hY2NvdW50..."

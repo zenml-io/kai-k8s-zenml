@@ -1,13 +1,20 @@
 #!/usr/bin/env bash
-set -x
+set -euo pipefail
 
-# Initialize default source directories
+# Enable debug output if DEBUG environment variable is set
+if [[ "${DEBUG:-0}" == "1" ]]; then
+    set -x
+fi
+
+# Initialize default source directory
 default_src="."
-# Initialize SRC as an empty string
-SRC=""
 
-# If no source directories were provided, use the default
-if [ -z "$SRC" ]; then
+# Check if command-line arguments are provided
+if [ $# -gt 0 ]; then
+    # Use all command-line arguments as source paths
+    SRC="$@"
+else
+    # Use default source directory if no arguments provided
     SRC="$default_src"
 fi
 

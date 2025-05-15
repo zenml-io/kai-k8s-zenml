@@ -478,5 +478,4 @@ The installation instructions for NVIDIA GPU Operator and KAI Scheduler are adap
 - [NVIDIA KAI Scheduler GitHub](https://github.com/NVIDIA/KAI-Scheduler)
 - [NVIDIA KAI Scheduler Documentation](https://docs.nvidia.com/kai-scheduler/index.html)
 - [Google Kubernetes Engine Documentation](https://cloud.google.com/kubernetes-engine/docs)
-- [Terraform GCP Provider
-  Documentation](https://registry.terraform.io/providers/hashicorp/google/latest/docs)
+ - [Terraform GCP Provider Documentation](https://registry.terraform.io/providers/hashicorp/google/latest/docs)

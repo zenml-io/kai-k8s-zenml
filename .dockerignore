@@ -1,3 +1,10 @@
 .venv
 .git
 .ruff_cache
+__pycache__/
+*.pyc
+.pytest_cache/
+.terraform/
+*.tfstate*
+.idea/
+.vscode/

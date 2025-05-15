@@ -64,7 +64,7 @@ output "set_active_stack_command" {
 }
 
 output "run_gpu_pipeline" {
-  value       = "python ../gpu_pipeline.py"
+  value       = "python ../run.py"
   description = "Command to run the GPU test pipeline"
 }
 

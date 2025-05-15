@@ -252,11 +252,11 @@ cd ..
 docker build -t yourusername/pytorch-zenml-gpu:root -f Dockerfile.pytorch .
 docker push yourusername/pytorch-zenml-gpu:root
 
-# IMPORTANT: After building and pushing the image, update the parent_image in gpu_pipeline.py 
+# IMPORTANT: After building and pushing the image, update the parent_image in run.py 
 # to match your username instead of "strickvl/"
 
 # Run the GPU test pipeline
-python gpu_pipeline.py
+python run.py
 ```
 
 ### Expected Output
@@ -273,7 +273,7 @@ Pipeline run completed successfully!
 
 ## GPU Sharing Configuration Options
 
-KAI Scheduler supports multiple approaches for GPU sharing. Our implementation in gpu_pipeline.py uses the following configuration:
+KAI Scheduler supports multiple approaches for GPU sharing. Our implementation in run.py uses the following configuration:
 
 ### Current Implementation (Fractional GPU with Node Targeting)
 

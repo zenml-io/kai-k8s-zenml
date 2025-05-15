@@ -185,7 +185,7 @@ def my_gpu_training_step(...):
 To verify your setup, run the included GPU pipeline:
 
 ```bash
-python gpu_pipeline.py
+python run.py
 ```
 
 ## Advanced Configuration

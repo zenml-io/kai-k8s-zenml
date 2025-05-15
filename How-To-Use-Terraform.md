@@ -114,6 +114,8 @@ Configure kubectl to connect to your cluster:
 $(terraform output -raw kubectl_command)
 ```
 
+**Note:** This command assumes you are running it from within the `terraform/` directory. If you've changed directories, ensure you navigate back to the `terraform/` directory before executing this command.
+
 ## Step 6: Apply KAI Scheduler Queue Configuration
 
 Apply the predefined queue configuration:
@@ -270,4 +272,5 @@ If you encounter issues:
 4. **ZenML integration issues**:
    - Verify ZenML is properly configured with server and API key
    - Check stack registration: `zenml stack list`
-   - Ensure stack components are configured correctly: `zenml stack describe $(terraform output -raw stack_name)`
+   - Ensure stack components are configured correctly: `zenml stack describe
+     $(terraform output -raw stack_name)`
